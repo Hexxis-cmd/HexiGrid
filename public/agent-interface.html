@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <title>HexiGrid Agent Interface</title>
+  <link rel="stylesheet" href="/agent-interface.css" />
+  <link rel="alternate" type="application/json" href="/api/agent-interface" title="HexiGrid agent interface manifest" />
+</head>
+<body>
+  <header><div><span>HEXIGRID / AGENT INTERFACE</span><h1>Predictable control surface</h1></div><nav><a href="/">Human interface</a><a href="/api/agent-interface">JSON manifest</a></nav></header>
+  <main id="agentInterface" aria-live="polite">
+    <section class="notice" id="agentStatus" data-resource="status"><h2>Status</h2><p>Reading the authenticated workspace…</p></section>
+    <section class="unlock-panel" id="agentUnlock" hidden>
+      <h2>Unlock this device</h2>
+      <p>The browser encryption key stays inside each unlocked tab. Enter the same local passcode you use in the human interface; it is processed on this device and is not sent to an AI provider.</p>
+      <form id="agentUnlockForm"><label>Local passcode<input id="agentPasscode" type="password" minlength="10" autocomplete="current-password" required /></label><button type="submit">Unlock agent interface</button><small id="agentUnlockFeedback" role="status"></small></form>
+    </section>
+    <section data-resource="rules"><h2>Operating rules</h2><ol id="agentRules"></ol></section>
+    <section data-resource="current-policy"><h2>Current policy</h2><dl id="agentPolicy"></dl></section>
+    <section data-resource="providers"><h2>Model connections</h2><div id="agentProviders"></div></section>
+    <section data-resource="agents"><h2>Agents</h2><div id="agentRoster"></div></section>
+    <section data-resource="rooms"><h2>Rooms</h2><div id="agentRooms"></div></section>
+    <section data-resource="receipts"><h2>Latest receipts</h2><div id="agentReceipts"></div></section>
+    <section data-resource="actions"><h2>Versioned actions</h2><div id="agentActions"></div></section>
+  </main>
+  <script src="/browser-crypto.js" defer></script>
+  <script src="/browser-vault.js" defer></script>
+  <script src="/browser-providers.js" defer></script>
+  <script src="/standalone-runtime.js" defer></script>
+  <script src="/agent-interface.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { validateProvider, completeWithProvider, testProviderConnection } from '../lib/providers.mjs';
+import { CredentialVault } from '../lib/vault.mjs';
+
+test('provider credentials cannot be embedded in endpoint URLs',()=>{
+  for(const baseUrl of ['http://cloud.example/v1','https://name:key@example.com/v1','https://example.com/v1?key=secret']) assert.throws(()=>validateProvider({name:'test',baseUrl,models:'model'}));
+  assert.equal(validateProvider({name:'test',baseUrl:'http://127.0.0.1:11434/v1',models:'model'}).local,true);
+});
+
+test('provider setup accepts an empty model list for server-side discovery',()=>{
+  const provider = validateProvider({name:'Discover me',baseUrl:'https://api.example.com/v1',models:'',apiStyle:'openai-chat'});
+  assert.deepEqual(provider.modelIds, []);
+});
+test('provider sends credentials only to the configured endpoint and refuses redirects',async()=>{
+  const result=await completeWithProvider({baseUrl:'https://example.com/v1'},'private-key','model','hello',{fetcher:async(url,options)=>{
+    assert.equal(url,'https://example.com/v1/chat/completions');assert.equal(options.redirect,'error');assert.equal(options.headers.authorization,'Bearer private-key');
+    return new Response(JSON.stringify({choices:[{message:{content:'Hi'}}],usage:{prompt_tokens:8,completion_tokens:2}}));
+  }});
+  assert.deepEqual(result,{content:'Hi',inputTokens:8,outputTokens:2});
+});
+test('provider errors never echo provider response bodies containing secrets',async()=>{
+  await assert.rejects(completeWithProvider({baseUrl:'https://example.com/v1'},'secret','model','hello',{fetcher:async()=>new Response('secret',{status:401})}),error=>!error.message.includes('secret'));
+});
+test('Anthropic, Responses, and Gemini adapters use their native wire formats', async () => {
+  const cases = [
+    {
+      provider: { baseUrl: 'https://api.anthropic.com/v1', apiStyle: 'anthropic' }, expectedUrl: '/messages', expectedHeader: 'x-api-key',
+      response: { content: [{ type: 'text', text: 'Anthropic reply' }], usage: { input_tokens: 5, output_tokens: 2 } }, expected: 'Anthropic reply'
+    },
+    {
+      provider: { baseUrl: 'https://api.openai.com/v1', apiStyle: 'openai-responses' }, expectedUrl: '/responses', expectedHeader: 'authorization',
+      response: { output_text: 'Responses reply', usage: { input_tokens: 6, output_tokens: 3 } }, expected: 'Responses reply'
+    },
+    {
+      provider: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', apiStyle: 'google-gemini' }, expectedUrl: '/models/test-model:generateContent', expectedHeader: 'x-goog-api-key',
+      response: { candidates: [{ content: { parts: [{ text: 'Gemini reply' }] } }], usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 4 } }, expected: 'Gemini reply'
+    }
+  ];
+  for (const item of cases) {
+    const result = await completeWithProvider(item.provider, 'secret', 'test-model', 'hello', { fetcher: async (url, options) => {
+      assert.ok(url.endsWith(item.expectedUrl)); assert.ok(options.headers[item.expectedHeader]); assert.equal(options.redirect, 'error');
+      return new Response(JSON.stringify(item.response), { status: 200 });
+    } });
+    assert.equal(result.content, item.expected);
+  }
+});
+test('provider health checks discover model IDs without returning credentials', async () => {
+  const result = await testProviderConnection({ baseUrl: 'http://127.0.0.1:11434/v1', apiStyle: 'openai-chat' }, 'secret', {
+    fetcher: async (url, options) => {
+      assert.equal(url, 'http://127.0.0.1:11434/v1/models'); assert.equal(options.headers.authorization, 'Bearer secret');
+      return new Response(JSON.stringify({ data: [{ id: 'local-one' }, { id: 'local-two' }] }), { status: 200 });
+    }
+  });
+  assert.deepEqual(result.models, ['local-one', 'local-two']); assert.doesNotMatch(JSON.stringify(result), /secret/);
+});
+test('Windows vault encrypts, retrieves, replaces and removes isolated keys',{skip:process.platform!=='win32'},async()=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),'aven iq-vault-'));
+  const vault=new CredentialVault(directory);
+  try{
+    await vault.set('provider-one','test-key-never-plaintext');
+    assert.ok(!(await readFile(vault.file('provider-one'),'utf8')).includes('test-key-never-plaintext'));
+    assert.equal(await vault.get('provider-one'),'test-key-never-plaintext');
+    assert.equal(await vault.get('provider-two'),'');
+    await vault.set('provider-one','replacement');assert.equal(await vault.get('provider-one'),'replacement');
+    await vault.remove('provider-one');assert.equal(await vault.get('provider-one'),'');
+    assert.throws(()=>vault.file('../escape'));
+  }finally{await rm(directory,{recursive:true,force:true});}
+});

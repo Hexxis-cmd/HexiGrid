@@ -1,0 +1,40 @@
+{
+  "name": "hexigrid",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "files": [
+    "server.mjs",
+    "Start-Control-Room.ps1",
+    "LICENSE.md",
+    "COMMERCIAL-LICENSE-TEMPLATE.md",
+    "THIRD-PARTY-NOTICES.md",
+    "lib/",
+    "public/",
+    "docs/",
+    "data/.gitkeep",
+    "scripts/"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check lib/development-reset.mjs && node --check lib/static-assets.mjs && node --check lib/on-device.mjs && node --check lib/agent-interface.mjs && node --check lib/firebase-auth.mjs && node --check scripts/release-preflight.mjs && node --check scripts/build-on-device.mjs && node --check scripts/build-firebase-client.mjs && node --check client/firebase-google.js && node --check public/boot-particles.js && node --check public/boot-veil.js && node --check public/boot-environment.js && node --check public/boot-loader.js && node --check public/interactions.js && node --check public/icons.js && node --check public/guide-content.js && node --check public/browser-crypto.js && node --check public/browser-vault.js && node --check public/browser-providers.js && node --check public/standalone-runtime.js && node --check public/agent-interface.js && node --check public/agent-ui.js && node --check public/chat-ui.js && node --check public/on-device-chat.js && node --check public/communication-ui.js && node --check public/workspace-ui.js && node --check public/guide-ui.js && node --check public/app.js && node --check public/providers.js && node --check public/harnesses.js && node --check public/control-shell.js && node --check public/task-ui.js && node --check public/plugin-ui.js && node --check public/backup-ui.js && node --check public/google-backup.js && node --check public/integrations.js && node --check public/auth-ui.js && node --check public/on-device-inference.js && node --check public/on-device-worker.js",
+    "test": "node --test test/*.test.mjs",
+    "privacy:check": "node scripts/release-preflight.mjs",
+    "release:verify": "npm run check && npm test && npm audit --omit=dev && npm run privacy:check",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "plugin:package": "node scripts/package-plugin.mjs",
+    "assets:pwa": "node scripts/generate-pwa-assets.mjs",
+    "assets:on-device": "node scripts/build-on-device.mjs",
+    "assets:firebase": "node scripts/build-firebase-client.mjs"
+  },
+  "devDependencies": {
+    "@mlc-ai/web-llm": "0.2.85",
+    "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "firebase": "^12.19.0"
+  }
+}
