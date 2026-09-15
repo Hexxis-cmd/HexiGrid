@@ -44,6 +44,7 @@
     <link rel="stylesheet" href="/interactions.css" />
     <link rel="stylesheet" href="/boot-layer.css" />
     <link rel="stylesheet" href="/boot-loader.css" />
+    <link rel="stylesheet" href="/live-communication.css" />
   </head>
   <body class="booting">
     <div
@@ -1374,13 +1375,13 @@ HexiGrid safe terminal. Type help to see available commands.</pre
             <div>
               <strong>Profile picture</strong>
               <p>
-                Choose a clear square image. It is resized and saved locally.
+                Choose a clear square image. Small animated GIF or WebP pictures stay animated; other pictures are resized and saved locally.
               </p>
               <label class="secondary-button file-button"
                 >Choose picture<input
                   id="agentPhotoInput"
                   type="file"
-                  accept="image/png,image/jpeg,image/webp" /></label
+                  accept="image/png,image/jpeg,image/webp,image/gif" /></label
               ><button
                 type="button"
                 class="ghost-button"
@@ -1791,5 +1792,9 @@ HexiGrid safe terminal. Type help to see available commands.</pre
     <script src="/google-backup.js" defer></script>
     <script src="/integrations.js" defer></script>
     <script src="/auth-ui.js" defer></script>
+    <script src="/live-voice.js" defer></script>
+    <script src="/live-recording.js" defer></script>
+    <script src="/live-call.js" defer></script>
+    <script src="/live-generated-voice.js" defer></script>
   </body>
 </html>

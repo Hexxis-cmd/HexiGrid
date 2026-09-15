@@ -60,13 +60,23 @@
     return { models, message: `Direct browser connection succeeded and reported ${models.length} model${models.length === 1 ? '' : 's'}.` };
   }
 
+  function visionParts(content) {
+    if (!Array.isArray(content)) return { text: String(content || ''), image: null };
+    const text = content.filter((part) => part?.type === 'text').map((part) => String(part.text || '')).join('\n');
+    const image = content.find((part) => part?.type === 'image_url')?.image_url?.url || null;
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(image || ''));
+    if (image && !match) throw new Error('The attached frame must be a PNG, JPEG, or WebP image.');
+    if (match && Math.floor(match[2].length * 3 / 4) > 1536 * 1024) throw new Error('The attached frame must be smaller than 1.5 MB.');
+    return { text, image: match ? { url: image, mimeType: match[1], base64: match[2] } : null };
+  }
+
   function completionRequest(provider, secret, model, messages) {
     const baseUrl = cleanUrl(provider.baseUrl);
-    const system = messages.filter((item) => item.role === 'system').map((item) => item.content).join('\n\n');
+    const system = messages.filter((item) => item.role === 'system').map((item) => visionParts(item.content).text).join('\n\n');
     const conversation = messages.filter((item) => item.role !== 'system');
-    if (provider.apiStyle === 'anthropic') return { url: `${baseUrl}/messages`, body: { model, max_tokens: 4096, system, messages: conversation } };
-    if (provider.apiStyle === 'google-gemini') return { url: `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`, body: { systemInstruction: system ? { parts: [{ text: system }] } : undefined, contents: conversation.map((item) => ({ role: item.role === 'assistant' ? 'model' : 'user', parts: [{ text: item.content }] })), generationConfig: { maxOutputTokens: 4096 } } };
-    if (provider.apiStyle === 'openai-responses') return { url: `${baseUrl}/responses`, body: { model, instructions: system || undefined, input: conversation } };
+    if (provider.apiStyle === 'anthropic') return { url: `${baseUrl}/messages`, body: { model, max_tokens: 4096, system, messages: conversation.map((item) => { const parts = visionParts(item.content); return { role: item.role, content: parts.image ? [{ type: 'text', text: parts.text }, { type: 'image', source: { type: 'base64', media_type: parts.image.mimeType, data: parts.image.base64 } }] : parts.text }; }) } };
+    if (provider.apiStyle === 'google-gemini') return { url: `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`, body: { systemInstruction: system ? { parts: [{ text: system }] } : undefined, contents: conversation.map((item) => { const parts = visionParts(item.content); return { role: item.role === 'assistant' ? 'model' : 'user', parts: parts.image ? [{ text: parts.text }, { inlineData: { mimeType: parts.image.mimeType, data: parts.image.base64 } }] : [{ text: parts.text }] }; }), generationConfig: { maxOutputTokens: 4096 } } };
+    if (provider.apiStyle === 'openai-responses') return { url: `${baseUrl}/responses`, body: { model, instructions: system || undefined, input: conversation.map((item) => { const parts = visionParts(item.content); return { role: item.role, content: parts.image ? [{ type: 'input_text', text: parts.text }, { type: 'input_image', image_url: parts.image.url }] : parts.text }; }) } };
     return { url: `${baseUrl}/chat/completions`, body: { model, messages, stream: false } };
   }
 
@@ -85,5 +95,26 @@
     return result;
   }
 
-  window.HexiGridBrowserProviders = Object.freeze({ DIRECT_ERROR, cleanUrl, discover, complete });
+  async function speech(provider, secret, input) {
+    const baseUrl = cleanUrl(provider.baseUrl);
+    if (!['openai-chat', 'openai-responses'].includes(provider.apiStyle || 'openai-chat')) throw new Error('This speech connector requires an OpenAI-compatible audio/speech endpoint.');
+    const model = String(input?.model || '').trim().slice(0, 240);
+    const voice = String(input?.voice || '').trim().slice(0, 200);
+    const text = String(input?.text || '').trim().slice(0, 12000);
+    if (!model || !voice || !text) throw new Error('Choose a speech model and voice, then enter preview text.');
+    let response;
+    try {
+      response = await fetch(`${baseUrl}/audio/speech`, { method: 'POST', mode: 'cors', credentials: 'omit', cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(180000), headers: headers(provider, secret, true), body: JSON.stringify({ model, voice, input: text, response_format: 'mp3' }) });
+    } catch { throw new Error('This speech provider did not allow a direct browser request. Use the local HexiGrid host or a provider that permits browser calls.'); }
+    if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? 'The speech provider rejected this key or voice permission.' : `Speech generation failed (${response.status}).`);
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > 20 * 1024 * 1024) throw new Error('The generated voice clip is larger than 20 MB.');
+    const mimeType = (response.headers.get('content-type') || 'audio/mpeg').split(';')[0].toLowerCase();
+    if (!['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4'].includes(mimeType)) throw new Error('The speech provider returned an unsupported audio format.');
+    const audioBlob = await response.blob();
+    if (!audioBlob.size || audioBlob.size > 20 * 1024 * 1024) throw new Error('The generated voice clip is empty or larger than 20 MB.');
+    return { audioBlob, mimeType };
+  }
+
+  window.HexiGridBrowserProviders = Object.freeze({ DIRECT_ERROR, cleanUrl, discover, complete, speech });
 })();

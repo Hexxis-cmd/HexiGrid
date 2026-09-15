@@ -163,7 +163,7 @@ function renderMediaLab() {
   if (providers.some((provider) => provider.id === current)) providerSelect.value = current;
   const chosen = providers.find((provider) => provider.id === providerSelect.value) || providers[0];
   document.querySelector('#imageModel').innerHTML = (chosen?.modelIds || []).map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join('');
-  document.querySelector('#mediaGallery').innerHTML = (state.data?.media || []).slice(0, 12).map((item) => `<figure><img src="${item.url}" alt="${escapeHtml(item.prompt)}" loading="lazy"><figcaption><strong>${escapeHtml(item.model)}</strong><span>${escapeHtml(new Date(item.createdAt).toLocaleString())}</span></figcaption></figure>`).join('') || '<div class="empty-state">Generated images will appear here.</div>';
+  document.querySelector('#mediaGallery').innerHTML = (state.data?.media || []).slice(0, 12).map((item) => `<figure>${item.type === 'audio' ? `<audio controls preload="none" src="${item.url}"></audio>` : `<img src="${item.url}" alt="${escapeHtml(item.prompt)}" loading="lazy">`}<figcaption><strong>${escapeHtml(item.model)}</strong><span>${escapeHtml(new Date(item.createdAt).toLocaleString())}</span></figcaption></figure>`).join('') || '<div class="empty-state">Generated images and voice clips will appear here.</div>';
 }
 
 function renderIntegrations() { renderRunnerProfiles(); renderMcpServers(); renderMediaLab(); void loadSessions(); }

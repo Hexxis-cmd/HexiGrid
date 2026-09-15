@@ -194,6 +194,21 @@ Use **Roll back last restore**. HexiGrid keeps an encrypted pre-restore snapshot
 
 Open **How-to guide → Let an AI guide setup** and choose **Copy setup prompt**. The prompt teaches an assistant to identify the right connection type, use the visible HexiGrid flow, stop for account consent, and keep secrets out of chat, logs, files, and Git. It does not give the assistant new permissions. The complete LLM-oriented version is in [Agent integration instructions](AGENT-INTEGRATION-PROMPT.md), and the predictable control surface is available at `/agent-interface.html` with its machine-readable manifest at `/api/agent-interface`.
 
+## Talk with one agent live
+
+The **Live** screen gives one agent the floor at a time. It is not a hidden call to iLands and it never starts your camera, microphone, screen, or recorder by itself.
+
+1. Open **Live** and choose the agent that should answer.
+2. Type a message, or choose **Start listening** and answer the browser's microphone question. A wake phrase is optional and only listens while this page is open.
+3. Choose **Start camera + mic** only if you want a private preview. Choose **Preview screen** to switch to a tab, window, or screen selected in the browser picker.
+4. To let a compatible vision model see one moment, choose **Attach current frame**, then send the message. The live video stays local; HexiGrid sends only that resized still image. Turn on **Include one fresh frame with every message** only when you want that behavior.
+5. For free spoken replies, preview the voices already on the device and save one to the agent. For a connected OpenAI-compatible speech service, mark that provider as supporting speech, enter its speech model and permitted voice IDs, make three real previews, and save the one you choose. Provider speech may cost money.
+6. **Stop voice** silences audio but does not cancel the written answer. The complete text remains in the live transcript.
+7. Choose **Save transcript** only when you want to keep the text in local encrypted state. Choose **Record to this device** only when you want a camera/screen recording downloaded to that device; recording stops after 15 minutes or about 250 MB.
+8. Choose **Stop media** when finished. Closing the page also releases camera, microphone, and screen tracks.
+
+If the camera, microphone, screen picker, speech recognition, speech output, or recorder is unavailable, HexiGrid disables or explains that control and keeps text chat usable. Browser support details are available from [MDN camera and microphone](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia), [MDN screen capture](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia), [MDN speech synthesis](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis), and [MDN MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).
+
 ## Keeping this guide current
 
 Provider-specific in-app content lives in `public/guide-content.js`, separate from application behavior. Any user-facing connection, permission, backup, or platform change must update that module and this document in the same change.

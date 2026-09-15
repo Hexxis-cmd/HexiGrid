@@ -1,0 +1,98 @@
+import test, { after, before } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { liveCommunicationLimits, sanitizeLiveTranscript, sanitizeVoiceProfile } from '../lib/live-communication.mjs';
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const port = 43934;
+let child;
+let dataDir;
+
+async function waitForServer() {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try { if ((await fetch(`http://127.0.0.1:${port}/api/bootstrap`)).ok) return; } catch { /* startup is still in progress */ }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('Live communication test server did not start.');
+}
+
+async function request(pathname, method = 'GET', body) {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, { method, headers: body === undefined ? {} : { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  return { response, body: await response.json().catch(() => ({})) };
+}
+
+before(async () => {
+  dataDir = await mkdtemp(path.join(os.tmpdir(), 'hexigrid-live-'));
+  child = spawn(process.execPath, ['server.mjs'], { cwd: root, windowsHide: true, env: { ...process.env, HEXIGRID_PORT: String(port), HEXIGRID_DATA_DIR: dataDir, OPENCODE_CLI: 'missing-opencode-for-live-test' }, stdio: 'ignore' });
+  await waitForServer();
+});
+
+after(async () => {
+  child?.kill();
+  await rm(dataDir, { recursive: true, force: true });
+});
+
+test('live data sanitizers bound voice settings and transcript content', () => {
+  const voice = sanitizeVoiceProfile({ voiceName: 'Device voice', rate: 9, pitch: -3, volume: 4 });
+  assert.deepEqual(voice, { engine: 'browser', voiceName: 'Device voice', providerId: '', model: '', voiceId: '', rate: 2, pitch: 0, volume: 1 });
+  const transcript = sanitizeLiveTranscript({ title: '  Session ', entries: Array.from({ length: liveCommunicationLimits.maxTranscriptEntries + 10 }, (_, index) => ({ role: 'agent', speaker: 'Agent', text: `Line ${index}` })) });
+  assert.equal(transcript.title, 'Session');
+  assert.equal(transcript.entries.length, liveCommunicationLimits.maxTranscriptEntries);
+  assert.equal(transcript.entries[0].text, 'Line 10');
+});
+
+test('live transcript save, listing, and deletion are local authenticated flows', async () => {
+  const agent = await request('/api/agents', 'POST', { name: 'Live test agent', transport: 'local-opencode', voiceProfile: { rate: 1.2 } });
+  assert.equal(agent.response.status, 201);
+  assert.deepEqual(agent.body.agent.voiceProfile, { engine: 'browser', voiceName: '', providerId: '', model: '', voiceId: '', rate: 1.2, pitch: 1, volume: 1 });
+  const saved = await request('/api/live/transcripts', 'POST', { title: 'Local test call', agentId: agent.body.agent.id, entries: [{ role: 'user', speaker: 'You', text: 'Hello from the live panel.' }, { role: 'agent', agentId: agent.body.agent.id, speaker: 'Live test agent', text: 'Hello back.' }] });
+  assert.equal(saved.response.status, 201);
+  assert.equal(saved.body.transcript.entries.length, 2);
+  const listed = await request('/api/live/transcripts');
+  assert.equal(listed.response.status, 200);
+  assert.equal(listed.body.transcripts[0].title, 'Local test call');
+  const deleted = await request(`/api/live/transcripts/${saved.body.transcript.id}`, 'DELETE');
+  assert.equal(deleted.response.status, 200);
+  assert.deepEqual((await request('/api/live/transcripts')).body.transcripts, []);
+});
+
+test('live media assets and same-origin media permissions are wired', async () => {
+  const script = await fetch(`http://127.0.0.1:${port}/live-call.js`);
+  const recording = await fetch(`http://127.0.0.1:${port}/live-recording.js`);
+  const generatedVoice = await fetch(`http://127.0.0.1:${port}/live-generated-voice.js`);
+  const style = await fetch(`http://127.0.0.1:${port}/live-communication.css`);
+  const page = await fetch(`http://127.0.0.1:${port}/`);
+  assert.equal(script.status, 200);
+  assert.equal(recording.status, 200);
+  assert.equal(generatedVoice.status, 200);
+  assert.equal(style.status, 200);
+  const liveCss = await style.text();
+  assert.match(liveCss, /\.live-stage>\.module-header,\.live-conversation>\.module-header,\.live-voice-panel>\.module-header[^}]*grid-template-columns:minmax\(0,1fr\) auto/);
+  assert.match(liveCss, /@media \(max-width:650px\)\{[\s\S]*?\.live-video-stage\{min-height:380px\}/);
+  const html = await page.text();
+  assert.match(html, /live-call\.js/);
+  assert.match(html, /live-recording\.js/);
+  assert.match(html, /live-generated-voice\.js/);
+  assert.match(page.headers.get('permissions-policy'), /camera=\(self\)/);
+  assert.match(page.headers.get('permissions-policy'), /microphone=\(self\)/);
+});
+
+test('voice and recording modules use real browser capability checks', async () => {
+  const voice = await (await fetch(`http://127.0.0.1:${port}/live-voice.js`)).text();
+  const recording = await (await fetch(`http://127.0.0.1:${port}/live-recording.js`)).text();
+  assert.match(voice, /const engine = speech\(\)/);
+  assert.match(voice, /typeof engine\.speak === 'function'/);
+  assert.match(recording, /new MediaRecorder/);
+  assert.match(recording, /MAX_DURATION_MS = 15 \* 60 \* 1000/);
+  assert.match(recording, /URL\.revokeObjectURL/);
+  const call = await (await fetch(`http://127.0.0.1:${port}/live-call.js`)).text();
+  assert.match(call, /Attach current frame/);
+  assert.match(call, /imageDataUrl: pendingFrame/);
+  const stopVoice = call.match(/function stopReply\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  assert.match(stopVoice, /HexiGridLiveVoice\?\.stop/);
+  assert.doesNotMatch(stopVoice, /turnController\?\.abort/);
+});

@@ -338,6 +338,7 @@ function renderAll({ preserveCommunication = false } = {}) {
   renderNetwork();
   if (!preserveCommunication) renderCommunication();
   $("#localStatus").textContent = availableModels().length ? "AI ready" : "Choose an AI connection";
+  window.dispatchEvent(new CustomEvent("hexigrid:rendered"));
 }
 
 function showView(view) {
@@ -349,6 +350,7 @@ function showView(view) {
     overview: ["CONTROL ROOM", "Everyone, in one place."],
     agents: ["AGENT PROFILES", "Shape every identity."],
     room: ["GROUP CHAT", "Think together."],
+    live: ["LIVE COMMUNICATION", "Talk to one agent."],
     communication: ["GLOBAL STYLE", "Make conversation feel natural."],
     models: ["AI MODEL ROUTING", "Choose each agent's model."],
     workspace: ["PRIVATE SANDBOX", "Create and test locally."],

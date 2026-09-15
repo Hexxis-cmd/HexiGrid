@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { validateProvider, completeWithProvider, testProviderConnection } from '../lib/providers.mjs';
+import { validateProvider, completeWithProvider, normalizeVisionInput, testProviderConnection } from '../lib/providers.mjs';
 import { CredentialVault } from '../lib/vault.mjs';
 
 test('provider credentials cannot be embedded in endpoint URLs',()=>{
@@ -21,6 +21,24 @@ test('provider sends credentials only to the configured endpoint and refuses red
     return new Response(JSON.stringify({choices:[{message:{content:'Hi'}}],usage:{prompt_tokens:8,completion_tokens:2}}));
   }});
   assert.deepEqual(result,{content:'Hi',inputTokens:8,outputTokens:2});
+});
+test('vision frames are bounded and translated to each provider wire format', async () => {
+  const frame = `data:image/jpeg;base64,${Buffer.from('small-frame').toString('base64')}`;
+  assert.equal(normalizeVisionInput({ text: 'What is visible?', imageDataUrl: frame }).mimeType, 'image/jpeg');
+  assert.throws(() => normalizeVisionInput({ text: 'bad', imageDataUrl: 'https://example.com/private.jpg' }));
+  const cases = [
+    { apiStyle: 'openai-chat', check: (body) => assert.equal(body.messages[0].content[1].type, 'image_url'), response: { choices: [{ message: { content: 'seen' } }] } },
+    { apiStyle: 'openai-responses', check: (body) => assert.equal(body.input[0].content[1].type, 'input_image'), response: { output_text: 'seen' } },
+    { apiStyle: 'anthropic', check: (body) => assert.equal(body.messages[0].content[1].source.media_type, 'image/jpeg'), response: { content: [{ type: 'text', text: 'seen' }] } },
+    { apiStyle: 'google-gemini', check: (body) => assert.equal(body.contents[0].parts[1].inlineData.mimeType, 'image/jpeg'), response: { candidates: [{ content: { parts: [{ text: 'seen' }] } }] } }
+  ];
+  for (const item of cases) {
+    const result = await completeWithProvider({ baseUrl: 'https://example.com/v1', apiStyle: item.apiStyle }, 'key', 'vision-model', { text: 'What is visible?', imageDataUrl: frame }, { fetcher: async (_url, options) => {
+      item.check(JSON.parse(options.body));
+      return new Response(JSON.stringify(item.response));
+    } });
+    assert.equal(result.content, 'seen');
+  }
 });
 test('provider errors never echo provider response bodies containing secrets',async()=>{
   await assert.rejects(completeWithProvider({baseUrl:'https://example.com/v1'},'secret','model','hello',{fetcher:async()=>new Response('secret',{status:401})}),error=>!error.message.includes('secret'));

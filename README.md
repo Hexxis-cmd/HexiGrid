@@ -14,6 +14,7 @@ It is a bridge between people and the AI tools they already use. You can run it 
 - Live model discovery instead of an outdated built-in model list.
 - Agent profiles with names, pictures, personalities, instructions, rules, memories, and model routing.
 - One-to-one and group chat with local activity receipts and token usage tracking.
+- A one-agent-at-a-time Live view with text, optional browser speech recognition, spoken replies, camera/screen preview, deliberate vision snapshots, local transcript saving, and opt-in device recording.
 - Planning, conversation, research, build, goal, and watch modes with approval controls.
 - Bounded autonomous tasks with pause, cancellation, retries, limits, and emergency stop.
 - Reviewed plugins and MCP tools with capability permissions, digest checks, isolation, and revocation.
@@ -67,6 +68,7 @@ The standalone vault uses PBKDF2-SHA-256 with 600,000 rounds and a unique random
 6. Give the agent a name and optional personality, instructions, rules, and picture.
 7. Open **Chat rooms**, create a room, select the agent, and send a short test message.
 8. Use **Activity** to see what happened and **AI usage** to see token totals.
+9. Open **Live** when you want to talk with one agent using the microphone, device voices, or an explicitly connected speech provider. Camera and screen video stay local; only a still frame you deliberately attach is sent to a compatible vision model.
 
 For an easy walkthrough, open **How-to guide** inside the app or read the [plain-language guide](docs/HOW-TO-GUIDE.md). It explains every supported connection, including current official sources and the exact HexiGrid fields to use.
 

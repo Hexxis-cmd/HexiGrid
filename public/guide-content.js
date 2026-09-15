@@ -189,6 +189,16 @@ VERIFICATION
       ['Preview and revise', 'Use Preview, read it aloud, and remove repeated phrases or overly technical wording.']
     ], [['The agent repeats catchphrases', 'Put the unwanted phrase in the Avoid list and add several different natural examples.'], ['The agent ignores a rule', 'Make the rule shorter and unambiguous, then make sure the active permission mode also blocks the action.']], 'Style prompts influence language; enforced permissions control actions.'),
 
+    live: topic('Live camera, voice, and screen', 'Talk with one agent at a time using browser media when your device supports it.', '5 minutes', 'speech', 'This view is a local live session. Your camera and microphone do not start until you press Start camera + mic, and text always remains available.', [
+      ['Choose one agent', 'Open Live and pick the one agent who should answer. HexiGrid keeps live replies one at a time so nobody talks over anybody else.'],
+      ['Start your camera and mic', 'Press Start camera + mic, then answer the browser permission question. The preview stays in this browser.'],
+      ['Preview your screen if needed', 'Press Preview screen and choose a window, tab, or whole screen in the browser picker. Press Stop screen preview when finished. The live video stays local unless you deliberately attach one still frame to a message.'],
+      ['Talk or type', 'Press Start listening if your browser supports speech recognition, or type in the message box. The agent reply stays as text and can be read aloud.'],
+      ['Choose a voice', 'Use the three previews in Voice preview, then choose Save voice for the selected agent. Voices come from the current device.'],
+      ['Save only what you want', 'The live transcript stays temporary while the view is open. Press Save transcript to keep it in local encrypted state, or download a text copy in standalone browser mode.'],
+      ['Stop cleanly', 'Use Stop media and Stop voice before leaving. Stop voice silences audio without cancelling the written reply. Closing the page also stops the local media tracks.']
+    ], [['The camera or mic will not start', 'Check the browser permission icon beside the address bar. If the browser or device does not support the API, keep using text and voice output.'], ['Speech recognition is missing', 'That is normal on some browsers, especially Safari and iOS. Use the message box; no Node.js or desktop computer is needed.'], ['I want a remote video call', 'This view is local by default. A remote peer needs an explicitly configured user-owned HTTPS signaling/relay service; an iLands Runner account is not silently treated as a video peer.']], 'HexiGrid never starts a recording or uploads camera and microphone data automatically.'),
+
     rooms: topic('Chat rooms and groups', 'Talk to one agent or several agents together.', '4 minutes', 'chat', 'A room holds a conversation and a chosen set of agents. Different agents may use different models.', [
       ['Create a room', 'Choose a short name based on the job or topic.'],
       ['Choose participants', 'Select one or more agent chips before sending. You can change participants later.'],

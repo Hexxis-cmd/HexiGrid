@@ -46,7 +46,7 @@ function renderAgentPhoto(name = $("#agentName").value || "Agent", color = "#8d7
 }
 
 async function resizeProfileImage(file) {
-  if (!file || !/^image\/(png|jpeg|webp)$/.test(file.type)) throw new Error("Choose a PNG, JPEG, or WebP image.");
+  if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error("Choose a PNG, JPEG, WebP, or animated GIF image.");
   if (file.size > 10 * 1024 * 1024) throw new Error("Choose an image smaller than 10 MB.");
   const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -54,6 +54,8 @@ async function resizeProfileImage(file) {
     reader.onerror = () => reject(new Error("That image could not be read."));
     reader.readAsDataURL(file);
   });
+  if ((file.type === 'image/gif' || file.type === 'image/webp') && file.size <= 1150 * 1024) return dataUrl;
+  if (file.type === 'image/gif') throw new Error('Animated GIF profile pictures must be smaller than 1.15 MB.');
   const image = await new Promise((resolve, reject) => {
     const element = new Image();
     element.onload = () => resolve(element);

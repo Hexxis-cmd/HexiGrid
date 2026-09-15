@@ -26,6 +26,8 @@ import { developmentResetEnabled, resetDevelopmentData } from './lib/development
 import { ON_DEVICE_PROVIDER_KIND, createOnDeviceProvider, isOnDeviceProvider, sanitizeOnDeviceProvider } from './lib/on-device.mjs';
 import { agentInterfaceManifest } from './lib/agent-interface.mjs';
 import { verifyFirebaseIdToken } from './lib/firebase-auth.mjs';
+import { publicLiveTranscript, sanitizeLiveTranscript, sanitizeVoiceProfile } from './lib/live-communication.mjs';
+import { generateSpeechWithProvider } from './lib/speech-provider.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_METADATA = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8'));
@@ -123,7 +125,8 @@ function seedState() {
     harnessConnections: [],
     runnerProfiles: [],
     pluginPublishers: [],
-    receipts: []
+    receipts: [],
+    liveTranscripts: []
   };
 }
 
@@ -202,6 +205,9 @@ async function loadState() {
   state.taskRuns ||= [];
   state.runnerProfiles ||= [];
   state.receipts ||= [];
+  state.liveTranscripts = Array.isArray(state.liveTranscripts)
+    ? state.liveTranscripts.map((item) => ({ id: cleanString(item?.id, id('transcript')), ...sanitizeLiveTranscript(item) })).slice(0, 100)
+    : [];
   if (Array.isArray(state.mcpServers)) for (const server of state.mcpServers) {
     if (server?.secrets && typeof server.secrets === 'object' && server.id) {
       try { await credentialVault.set(`mcp-${server.id}`, JSON.stringify(server.secrets)); migratedSecrets = true; }
@@ -225,7 +231,13 @@ async function loadState() {
     if (!verified.ok) quarantinePlugin(plugin, verified.error);
   }
   await refreshPluginCredentialStatus();
-  state.agents = state.agents.map((agent) => ({ model: state.settings.model || MODEL, useGlobalCommunication: true, avatarImage: "", ...agent }));
+  state.agents = state.agents.map((agent) => ({
+    model: state.settings.model || MODEL,
+    useGlobalCommunication: true,
+    avatarImage: "",
+    ...agent,
+    voiceProfile: sanitizeVoiceProfile(agent.voiceProfile)
+  }));
   if ((state.version || 1) < 2) {
     const placeholders = new Set(["agent-1", "agent-2", "agent-3"]);
     const isPlaceholder = (agent) => placeholders.has(agent.id) && /^Agent [123]$/.test(agent.name) && !agent.ilandsAgentId && !agent.personality && !agent.instructions && !agent.rules && !agent.avatarImage;
@@ -282,7 +294,7 @@ function safeProviderRecord(provider) {
     return {
       id: providerId,
       ...normalized,
-      capabilities: Array.isArray(safe.capabilities) ? safe.capabilities.filter((item) => ['chat', 'image'].includes(item)).slice(0, 2) : ['chat'],
+      capabilities: Array.isArray(safe.capabilities) ? safe.capabilities.filter((item) => ['chat', 'image', 'speech'].includes(item)).slice(0, 3) : ['chat'],
       hasKey: provider?.hasKey === true,
       createdAt: typeof safe.createdAt === 'string' ? safe.createdAt.slice(0, 40) : undefined,
       lastCheckedAt: typeof safe.lastCheckedAt === 'string' ? safe.lastCheckedAt.slice(0, 40) : undefined,
@@ -376,6 +388,7 @@ function publicState() {
     mcpServers: (state.mcpServers || []).map(publicMcpRecord),
     media: (state.media || []).slice(0, 500).map((item) => ({ ...item, url: `/api/media/${item.id}` })),
     memories: state.memories || [],
+    liveTranscripts: (state.liveTranscripts || []).map(publicLiveTranscript),
     backupRecovery: { localRollbackAvailable: Boolean(state.recovery?.lastRestoreAt && existsSync(stateStore.previousFile)) },
     communicationDefaults: defaultCommunicationGuide(),
     security: {
@@ -426,6 +439,9 @@ async function restoreState(payload, { restoreFiles = true, protectImported = tr
     taskRuns: Array.isArray(payload.taskRuns) ? payload.taskRuns.slice(-10000).map((run) => protectImported && run.status === 'running' ? { ...run, status: 'interrupted', error: 'The run was paused during backup restore.', finishedAt: now() } : run) : [],
     runnerProfiles: Array.isArray(payload.runnerProfiles) ? payload.runnerProfiles.filter((profile) => /^[a-z0-9-]{3,80}$/.test(String(profile.id || ''))).map((profile) => ({ ...profile, home: path.join(RUNNER_PROFILE_DIR, profile.id) })) : [],
     receipts: Array.isArray(payload.receipts) ? payload.receipts.slice(0, 10000) : [],
+    liveTranscripts: Array.isArray(payload.liveTranscripts)
+      ? payload.liveTranscripts.map((item) => ({ id: cleanString(item?.id, id('transcript')), ...sanitizeLiveTranscript(item) })).slice(0, 100)
+      : [],
     mcpServers: Array.isArray(payload.mcpServers) ? payload.mcpServers.map((server) => ({ ...safeMcpRecord(server), enabled: false, hasSecrets: false })) : [],
     media: Array.isArray(payload.media) ? payload.media.slice(0, 500) : [],
     memories: Array.isArray(payload.memories) ? payload.memories.slice(0, 50000) : []
@@ -635,7 +651,7 @@ function securityHeaders(contentType) {
     "content-type": contentType,
     "cache-control": "no-store",
     "content-security-policy": "default-src 'self'; script-src 'self' https://apis.google.com; worker-src 'self'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; connect-src 'self' https:; frame-src https://hexigrid.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "permissions-policy": "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
@@ -692,8 +708,8 @@ function cleanString(value, fallback = "") {
 }
 
 function cleanImageData(value) {
-  if (typeof value !== "string" || value.length > 450000) return "";
-  return /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value) ? value : "";
+  if (typeof value !== "string" || value.length > 1600000) return "";
+  return /^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(value) ? value : "";
 }
 
 function slug(value) {
@@ -1119,7 +1135,7 @@ function setupGuide() {
   };
 }
 
-async function localProfileReply(agent, transcript, { approved = false, source = 'room', signal } = {}) {
+async function localProfileReply(agent, transcript, { approved = false, source = 'room', signal, imageDataUrl = '' } = {}) {
   const memories = (state.memories || []).filter((memory) => memory.agentId === agent.id).sort((left, right) => right.importance - left.importance || new Date(right.updatedAt) - new Date(left.updatedAt)).slice(0, 100);
   const prompt = [
     `You are ${agent.name}, an agent profile in HexiGrid.`,
@@ -1142,11 +1158,13 @@ async function localProfileReply(agent, transcript, { approved = false, source =
   if (route?.providerId) {
     const provider = state.providers.find(item => item.id === route.providerId);
     if (route.browser) throw new Error('This model runs inside the selected browser. Send the message from that browser instead.');
-    const result = await completeWithProvider(provider,provider.hasKey ? await credentialVault.get(provider.id) : '',route.remoteModel,prompt, { signal });
+    const providerPrompt = imageDataUrl ? { text: `${prompt}\n\nThe owner deliberately attached one current camera or screen frame. Describe only what is visible and do not infer hidden details.`, imageDataUrl } : prompt;
+    const result = await completeWithProvider(provider,provider.hasKey ? await credentialVault.get(provider.id) : '',route.remoteModel,providerPrompt, { signal });
     recordUsage({agentId:agent.id,model,inputText:prompt,outputText:result.content,inputTokens:result.inputTokens,outputTokens:result.outputTokens,source});
     return result.content;
   }
   const workspace = agentWorkspace(agent.id);
+  if (imageDataUrl) throw new Error('The selected CLI connection accepts text only here. Choose a vision-capable API model to share a frame.');
   await fs.mkdir(workspace, { recursive: true });
   if (!route?.harnessId) throw new Error('The selected local harness is not connected. Choose a model in Connections.');
   let result;
@@ -1188,6 +1206,7 @@ async function respondForAgent(agent, transcript, options = {}) {
 }
 
 const activeTaskRuns = new Map();
+const liveAudioClips = new Map();
 function stopExecutionForRestore() {
   const activeTasks = activeTaskRuns.size;
   for (const controller of activeTaskRuns.values()) controller.abort('restore');
@@ -1709,7 +1728,7 @@ async function route(req, res) {
       if (!discovery.models.length) return json(res, 422, { error: 'The service connected but did not list its models. Open Advanced settings and enter the model ID supplied by that service.' });
       config.modelIds = discovery.models;
     }
-    const provider = { ...config, id:id('provider'), capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item) => ['chat', 'image'].includes(item)) : ['chat'], hasKey:Boolean(body.apiKey), createdAt:now(), lastCheckedAt: discovery ? now() : undefined, lastError: '' };
+    const provider = { ...config, id:id('provider'), capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item) => ['chat', 'image', 'speech'].includes(item)) : ['chat'], hasKey:Boolean(body.apiKey), createdAt:now(), lastCheckedAt: discovery ? now() : undefined, lastError: '' };
     if (!provider.capabilities.length) provider.capabilities = ['chat'];
     if (body.apiKey) await credentialVault.set(provider.id,body.apiKey);
     state.providers.push(provider);
@@ -1759,6 +1778,34 @@ async function route(req, res) {
       await saveState();
       return json(res,200,{ok:true,message:`${response.message} Model generation is checked when you send a message.`, models: response.models, receipt: state.receipts[0]});
     }
+  }
+  const liveSpeechMatch = pathname.match(/^\/api\/live\/speech\/([a-z0-9-]+)$/);
+  if (liveSpeechMatch && method === 'GET') {
+    const clip = liveAudioClips.get(liveSpeechMatch[1]);
+    if (!clip || clip.expiresAt < Date.now()) { liveAudioClips.delete(liveSpeechMatch[1]); return json(res, 404, { error: 'This temporary voice clip expired.' }); }
+    res.writeHead(200, { ...securityHeaders(clip.mimeType), 'content-length': clip.bytes.length, 'cache-control': 'private, no-store', 'content-disposition': 'inline' });
+    return res.end(clip.bytes);
+  }
+  if (pathname === '/api/live/speech' && method === 'POST') {
+    const body = await readBody(req);
+    const provider = state.providers.find((item) => item.id === cleanString(body.providerId));
+    if (!provider || !provider.capabilities?.includes('speech')) return json(res, 400, { error: 'Choose a provider configured for speech generation.' });
+    const model = cleanString(body.model).slice(0, 240);
+    if (!model || !provider.modelIds.includes(model)) return json(res, 400, { error: 'Choose one of this provider’s configured speech models.' });
+    const policy = evaluatePolicy({ approvalPolicy: state.settings.approvalPolicy, workMode: state.settings.workMode, capability: 'generate_media', risk: provider.local ? 'low' : 'medium' });
+    if (policy.decision === 'deny') return json(res, 403, { error: policy.reason, denied: true, policy });
+    if (policy.decision === 'ask' && body.approved !== true) return json(res, 409, { error: policy.reason, approvalRequired: true, policy });
+    try {
+      const secret = provider.hasKey ? await credentialVault.get(provider.id) : '';
+      const generated = await generateSpeechWithProvider(provider, secret, { model, voice: body.voice, text: body.text });
+      for (const [expiredId, clip] of liveAudioClips) if (clip.expiresAt < Date.now()) liveAudioClips.delete(expiredId);
+      while (liveAudioClips.size >= 20) liveAudioClips.delete(liveAudioClips.keys().next().value);
+      const clipId = id('speech');
+      liveAudioClips.set(clipId, { bytes: generated.bytes, mimeType: generated.mimeType, expiresAt: Date.now() + 10 * 60 * 1000 });
+      addReceipt({ action: 'generate_speech', capability: 'generate_media', risk: provider.local ? 'low' : 'medium', status: 'completed', detail: `${provider.name} generated a local voice clip.`, source: 'provider' });
+      addActivity('media', `A voice clip was generated with ${provider.name}.`); await saveState();
+      return json(res, 201, { media: { id: clipId, type: 'audio', mimeType: generated.mimeType, model, voice: cleanString(body.voice).slice(0, 200), size: generated.bytes.length, url: `/api/live/speech/${clipId}`, expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() }, receipt: state.receipts[0] });
+    } catch (error) { addReceipt({ action: 'generate_speech', capability: 'generate_media', risk: provider.local ? 'low' : 'medium', status: 'failed', detail: error.message, source: 'provider' }); await saveState(); return json(res, 502, { error: error.message }); }
   }
   if (pathname === '/api/media/images' && method === 'POST') {
     const body = await readBody(req);
@@ -2067,6 +2114,7 @@ async function route(req, res) {
       personality: cleanString(body.personality),
       instructions: cleanString(body.instructions),
       rules: cleanString(body.rules),
+      voiceProfile: sanitizeVoiceProfile(body.voiceProfile),
       model: allowedModel(cleanString(body.model))?.id || state.settings.model,
       useGlobalCommunication: body.useGlobalCommunication !== false,
       tags: Array.isArray(body.tags) ? body.tags.map((tag) => cleanString(tag).slice(0, 30)).filter(Boolean).slice(0, 12) : [],
@@ -2119,7 +2167,7 @@ async function route(req, res) {
     const agent = findAgent(agentMatch[1]);
     if (!agent) return json(res, 404, { error: "Agent not found." });
     const body = await readBody(req);
-    const editable = ["name", "accountLabel", "avatar", "avatarImage", "color", "transport", "harness", "ilandsAgentId", "runnerHome", "workspacePath", "personality", "instructions", "rules", "status", "tags", "model", "useGlobalCommunication"];
+    const editable = ["name", "accountLabel", "avatar", "avatarImage", "color", "transport", "harness", "ilandsAgentId", "runnerHome", "workspacePath", "personality", "instructions", "rules", "status", "tags", "model", "useGlobalCommunication", "voiceProfile"];
     for (const key of editable) {
       if (body[key] === undefined) continue;
       if (["name", "accountLabel", "avatar", "color", "ilandsAgentId", "runnerHome", "workspacePath", "personality", "instructions", "rules", "status"].includes(key)) agent[key] = cleanString(body[key]);
@@ -2129,6 +2177,7 @@ async function route(req, res) {
       else if (key === "tags" && Array.isArray(body[key])) agent[key] = body[key].map((tag) => cleanString(tag).slice(0, 30)).filter(Boolean).slice(0, 12);
       else if (key === "model" && allowedModel(cleanString(body[key]))) agent[key] = cleanString(body[key]);
       else if (key === "useGlobalCommunication") agent[key] = body[key] !== false;
+      else if (key === "voiceProfile" && body[key] && typeof body[key] === "object") agent[key] = sanitizeVoiceProfile(body[key]);
     }
     agent.updatedAt = now();
     if (agent.transport === "local-opencode") agent.status = "local_ready";
@@ -2301,7 +2350,7 @@ async function route(req, res) {
     const replies = [];
     for (const agentId of selectedIds) {
       const agent = findAgent(agentId);
-      const response = await respondForAgent(agent, recent, { approved: body.approved === true, source: 'room' });
+      const response = await respondForAgent(agent, recent, { approved: body.approved === true, source: 'room', imageDataUrl: typeof body.imageDataUrl === 'string' ? body.imageDataUrl.trim() : '' });
       const message = response.ok
         ? { id: id("msg"), role: "agent", agentId: agent.id, author: agent.name, content: response.content, transport: response.transport, delivery: response.delivery, connector: response.connector, createdAt: now() }
         : { id: id("msg"), role: "system", agentId: agent.id, author: agent.name, content: response.error, createdAt: now() };
@@ -2313,6 +2362,32 @@ async function route(req, res) {
     addActivity("chat", `You sent a message to ${selectedIds.length} agent${selectedIds.length === 1 ? "" : "s"} in ${room.name}.`);
     await saveState();
     return json(res, 200, { room, replies });
+  }
+
+  if (pathname === '/api/live/transcripts' && method === 'GET') {
+    return json(res, 200, { transcripts: (state.liveTranscripts || []).map(publicLiveTranscript) });
+  }
+
+  if (pathname === '/api/live/transcripts' && method === 'POST') {
+    const body = await readBody(req, Math.min(MAX_BODY_BYTES, 4 * 1024 * 1024));
+    const transcript = sanitizeLiveTranscript(body);
+    if (!transcript.entries.length) return json(res, 400, { error: 'Save a live conversation before saving its transcript.' });
+    const record = { id: id('transcript'), ...transcript };
+    state.liveTranscripts = [record, ...(state.liveTranscripts || [])].slice(0, 100);
+    addReceipt({ action: `live-transcript:${record.id}:save`, capability: 'write_local', risk: 'low', status: 'completed', detail: 'A live transcript was saved to the local control room.', source: 'live' });
+    addActivity('communication', 'A live transcript was saved locally.');
+    await saveState();
+    return json(res, 201, { transcript: publicLiveTranscript(record), receipt: state.receipts[0] });
+  }
+
+  const liveTranscriptMatch = pathname.match(/^\/api\/live\/transcripts\/([a-z0-9-]+)$/);
+  if (liveTranscriptMatch && method === 'DELETE') {
+    const prior = state.liveTranscripts?.length || 0;
+    state.liveTranscripts = (state.liveTranscripts || []).filter((item) => item.id !== liveTranscriptMatch[1]);
+    if (state.liveTranscripts.length === prior) return json(res, 404, { error: 'Transcript not found.' });
+    addReceipt({ action: `live-transcript:${liveTranscriptMatch[1]}:delete`, capability: 'write_local', risk: 'medium', status: 'completed', detail: 'A saved live transcript was deleted from local storage.', source: 'live' });
+    await saveState();
+    return json(res, 200, { ok: true });
   }
 
   if (pathname === "/api/settings" && method === "PATCH") {

@@ -44,7 +44,7 @@
         auth: { configured: true, provider: 'browser-passcode' }, plugins: { grants: {} }, autoStart: false, setupAcknowledged: false
       },
       agents: [], rooms: [], activity: [], usage: [], providers: [], receipts: [], memories: [], tasks: [], taskRuns: [],
-      plugins: [], pluginPublishers: [], mcpServers: [], media: [], runnerProfiles: [], harnessConnections: []
+      plugins: [], pluginPublishers: [], mcpServers: [], media: [], runnerProfiles: [], harnessConnections: [], liveTranscripts: []
     };
   }
 
@@ -92,18 +92,23 @@
       bridge: { runnerInstalled: false, model: state.settings.model, port: null, supportedRunnerHarnesses: [], standaloneBrowser: true, modelCatalogError: '' },
       policyCatalog: { workModes, approvalProfiles, riskLevels: ['none', 'low', 'medium', 'high', 'critical'] }, modelCatalog: [], harnesses: [], harnessConnections: [],
       providers: state.providers.map(publicProvider), plugins: [], pluginPublishers: [], tasks: [], taskRuns: [], runnerProfiles: [], receipts: structuredClone(state.receipts),
-      mcpServers: [], media: [], memories: structuredClone(state.memories), backupRecovery: { localRollbackAvailable: Boolean(previousState) }, communicationDefaults: communicationDefaults(),
+      mcpServers: [], media: [], memories: structuredClone(state.memories), liveTranscripts: structuredClone(state.liveTranscripts || []), backupRecovery: { localRollbackAvailable: Boolean(previousState) }, communicationDefaults: communicationDefaults(),
       security: { credentialVaultAvailable: true, localStateEncryption: 'browser-passcode-aes-256-gcm', secretFeaturesAvailable: true, standaloneBrowser: true, notice: 'Provider keys and local data are encrypted in this browser with your passcode. The usable key exists only while this page is unlocked.' },
       guide: { steps: ['Create or unlock this browser vault.', 'Connect a direct cloud API or an on-device model.', 'Create an agent and assign a discovered model.', 'Send a test message and review its local receipt.'] }
     };
   }
 
-  async function completeAgent(state, agent, room) {
+  async function completeAgent(state, agent, room, imageDataUrl = '') {
     const route = routeForModel(state, agent.model);
     if (!route) throw new Error('Assign this agent a connected cloud model first.');
     const messages = window.HexiGridBrowserChat?.browserAgentMessages
       ? window.HexiGridBrowserChat.browserAgentMessages({ agent, room, settings: state.settings, memories: state.memories })
       : [{ role: 'system', content: `You are ${agent.name}. ${agent.instructions || ''}` }, ...room.messages.slice(-18).map((message) => ({ role: message.role === 'user' ? 'user' : 'assistant', content: message.content }))];
+    if (imageDataUrl) {
+      const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+      if (!lastUser) throw new Error('A frame needs a user message.');
+      lastUser.content = [{ type: 'text', text: `${lastUser.content}\n\nThe owner deliberately attached one current camera or screen frame. Describe only what is visible and do not infer hidden details.` }, { type: 'image_url', image_url: { url: imageDataUrl } }];
+    }
     return providerApi().complete(route.provider, route.provider.secret, route.model, messages);
   }
 
@@ -115,7 +120,7 @@
       let records = [];
       if (clean(body.models)) records = clean(body.models).split(/[\n,]/).map((model) => ({ id: model.trim(), label: model.trim(), pricing: null })).filter((model) => model.id).slice(0, 300);
       else records = (await providerApi().discover(config, secret)).models;
-      const provider = { ...config, id: id('provider'), kind: 'browser-cloud', enabled: true, capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item) => ['chat', 'image'].includes(item)) : ['chat'], secret, modelIds: records.map((item) => item.id), modelMeta: records, createdAt: now(), lastCheckedAt: now(), lastError: '' };
+      const provider = { ...config, id: id('provider'), kind: 'browser-cloud', enabled: true, capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item) => ['chat', 'image', 'speech'].includes(item)) : ['chat'], secret, modelIds: records.map((item) => item.id), modelMeta: records, createdAt: now(), lastCheckedAt: now(), lastError: '' };
       state.providers.push(provider);
       if (!state.settings.model) state.settings.model = `provider:${provider.id}:${provider.modelIds[0]}`;
       addReceipt(state, { action: `provider:${provider.id}:connect`, capability: 'network_read', risk: 'medium', detail: `${provider.name} connected directly from this browser and reported ${provider.modelIds.length} models.` });
@@ -222,7 +227,8 @@
 
     if (pathname === '/api/agents' && method === 'POST') {
       const body = bodyOf(options); const name = clean(body.name, `Agent ${state.agents.length + 1}`);
-      const agent = { id: id('agent'), name, accountLabel: clean(body.accountLabel, 'Standalone browser'), avatar: clean(body.avatar, name[0]?.toUpperCase() || 'A'), avatarImage: clean(body.avatarImage), color: clean(body.color, '#8d7dff'), status: 'local_ready', transport: 'browser', harness: '', ilandsAgentId: '', runnerHome: '', workspacePath: '', personality: clean(body.personality), instructions: clean(body.instructions), rules: clean(body.rules), model: clean(body.model, state.settings.model), useGlobalCommunication: body.useGlobalCommunication !== false, tags: Array.isArray(body.tags) ? body.tags.slice(0, 12) : [], createdAt: now(), updatedAt: now() };
+      const voice = body.voiceProfile && typeof body.voiceProfile === 'object' ? body.voiceProfile : {};
+      const agent = { id: id('agent'), name, accountLabel: clean(body.accountLabel, 'Standalone browser'), avatar: clean(body.avatar, name[0]?.toUpperCase() || 'A'), avatarImage: clean(body.avatarImage), color: clean(body.color, '#8d7dff'), status: 'local_ready', transport: 'browser', harness: '', ilandsAgentId: '', runnerHome: '', workspacePath: '', personality: clean(body.personality), instructions: clean(body.instructions), rules: clean(body.rules), model: clean(body.model, state.settings.model), useGlobalCommunication: body.useGlobalCommunication !== false, voiceProfile: { engine: voice.engine === 'provider' ? 'provider' : 'browser', voiceName: clean(voice.voiceName).slice(0, 200), providerId: clean(voice.providerId).slice(0, 120), model: clean(voice.model).slice(0, 240), voiceId: clean(voice.voiceId).slice(0, 200), rate: Math.min(2, Math.max(.5, Number(voice.rate) || 1)), pitch: Math.min(2, Math.max(0, Number(voice.pitch) || 1)), volume: Math.min(1, Math.max(0, Number(voice.volume) || 1)) }, tags: Array.isArray(body.tags) ? body.tags.slice(0, 12) : [], createdAt: now(), updatedAt: now() };
       state.agents.push(agent); addActivity(state, 'agent', `${agent.name} was added to this browser.`); await save(state); return { agent };
     }
     const duplicate = pathname.match(/^\/api\/agents\/([^/]+)\/duplicate$/);
@@ -230,7 +236,14 @@
     const agentMatch = pathname.match(/^\/api\/agents\/([^/]+)$/);
     if (agentMatch) {
       const agent = state.agents.find((item) => item.id === agentMatch[1]); if (!agent) failure(404, 'Agent not found.');
-      if (method === 'PATCH') { Object.assign(agent, bodyOf(options), { updatedAt: now() }); await save(state); return { agent }; }
+      if (method === 'PATCH') {
+        const patch = bodyOf(options);
+        if (patch.voiceProfile && typeof patch.voiceProfile === 'object') {
+          const voice = patch.voiceProfile;
+          patch.voiceProfile = { engine: voice.engine === 'provider' ? 'provider' : 'browser', voiceName: clean(voice.voiceName).slice(0, 200), providerId: clean(voice.providerId).slice(0, 120), model: clean(voice.model).slice(0, 240), voiceId: clean(voice.voiceId).slice(0, 200), rate: Math.min(2, Math.max(.5, Number(voice.rate) || 1)), pitch: Math.min(2, Math.max(0, Number(voice.pitch) || 1)), volume: Math.min(1, Math.max(0, Number(voice.volume) || 1)) };
+        }
+        Object.assign(agent, patch, { updatedAt: now() }); await save(state); return { agent };
+      }
       if (method === 'DELETE') { state.agents = state.agents.filter((item) => item.id !== agent.id); state.rooms.forEach((room) => { room.agentIds = room.agentIds.filter((item) => item !== agent.id); }); state.memories = state.memories.filter((item) => item.agentId !== agent.id); await save(state); return { ok: true }; }
     }
 
@@ -246,11 +259,31 @@
       const room = state.rooms.find((item) => item.id === messages[1]); if (!room) failure(404, 'Room not found.'); const body = bodyOf(options);
       if (body.includeUserMessage !== false) { const content = clean(body.content); if (!content) failure(400, 'Message is empty.'); room.messages.push({ id: id('msg'), role: 'user', author: 'You', content, createdAt: now() }); }
       const selected = (Array.isArray(body.agentIds) ? body.agentIds : room.agentIds).map((agentId) => state.agents.find((agent) => agent.id === agentId)).filter(Boolean); if (!selected.length) failure(400, 'Select at least one agent first.');
-      for (const agent of selected) { const result = await completeAgent(state, agent, room); room.messages.push({ id: id('msg'), role: 'agent', agentId: agent.id, author: agent.name, content: result.content, delivery: 'direct-browser', createdAt: now() }); state.usage.push({ id: id('usage'), agentId: agent.id, model: agent.model, inputTokens: Number(result.inputTokens) || 0, outputTokens: Number(result.outputTokens) || 0, source: 'direct-browser', createdAt: now() }); addReceipt(state, { agentId: agent.id, action: `model:${agent.model}`, capability: 'conversation', detail: `${agent.name} replied through a direct browser HTTPS request.` }); }
+      for (const agent of selected) { const result = await completeAgent(state, agent, room, clean(body.imageDataUrl)); room.messages.push({ id: id('msg'), role: 'agent', agentId: agent.id, author: agent.name, content: result.content, delivery: 'direct-browser', createdAt: now() }); state.usage.push({ id: id('usage'), agentId: agent.id, model: agent.model, inputTokens: Number(result.inputTokens) || 0, outputTokens: Number(result.outputTokens) || 0, source: 'direct-browser', createdAt: now() }); addReceipt(state, { agentId: agent.id, action: `model:${agent.model}`, capability: 'conversation', detail: `${agent.name} replied through a direct browser HTTPS request.` }); }
       await save(state); return { room };
     }
     if (pathname === '/api/assistant' && method === 'POST') { const content = clean(bodyOf(options).content); const route = routeForModel(state, state.settings.model); if (!route) failure(400, 'Choose a connected cloud model first.'); const result = await providerApi().complete(route.provider, route.provider.secret, route.model, [{ role: 'system', content: 'You are the HexiGrid control assistant. Explain setup in plain language. Never claim to use a tool unless a receipt confirms it.' }, { role: 'user', content }]); state.usage.push({ id: id('usage'), model: state.settings.model, inputTokens: Number(result.inputTokens) || 0, outputTokens: Number(result.outputTokens) || 0, source: 'direct-browser', createdAt: now() }); await save(state); return { content: result.content, model: state.settings.model }; }
     if (pathname === '/api/communication/preview' && method === 'POST') { const body = bodyOf(options); return { content: `Got it — ${clean(body.message, 'I’ll keep replies clear, natural, and brief.')}` }; }
+
+    if (pathname === '/api/live/speech' && method === 'POST') {
+      const body = bodyOf(options); const provider = state.providers.find((item) => item.id === clean(body.providerId));
+      if (!provider || !provider.capabilities?.includes('speech')) failure(400, 'Choose a provider configured for speech generation.');
+      if (!provider.modelIds.includes(clean(body.model))) failure(400, 'Choose one of this provider’s configured speech models.');
+      const result = await providerApi().speech(provider, provider.secret, { model: body.model, voice: body.voice, text: body.text });
+      addReceipt(state, { action: 'generate_speech', capability: 'generate_media', risk: 'medium', detail: `${provider.name} generated a voice clip directly for this browser.` }); await save(state);
+      return { media: { type: 'audio', audioBlob: result.audioBlob, mimeType: result.mimeType, model: clean(body.model), voice: clean(body.voice) } };
+    }
+
+    if (pathname === '/api/live/transcripts' && method === 'GET') return { transcripts: structuredClone(state.liveTranscripts || []) };
+    if (pathname === '/api/live/transcripts' && method === 'POST') {
+      const body = bodyOf(options);
+      const entries = Array.isArray(body.entries) ? body.entries.slice(-600).map((entry) => ({ role: ['user', 'agent', 'system'].includes(entry?.role) ? entry.role : 'system', agentId: clean(entry?.agentId) || null, speaker: clean(entry?.speaker, entry?.role === 'user' ? 'You' : 'HexiGrid'), text: clean(entry?.text).slice(0, 12000), createdAt: clean(entry?.createdAt, now()) })).filter((entry) => entry.text) : [];
+      if (!entries.length) failure(400, 'Save a live conversation before saving its transcript.');
+      const transcript = { id: id('transcript'), title: clean(body.title, 'Live session').slice(0, 160), agentId: clean(body.agentId) || null, roomId: clean(body.roomId) || null, entries, createdAt: now(), updatedAt: now() };
+      state.liveTranscripts = [transcript, ...(state.liveTranscripts || [])].slice(0, 100); addReceipt(state, { action: `live-transcript:${transcript.id}:save`, capability: 'write_local', detail: 'A live transcript was saved to this browser.' }); await save(state); return { transcript };
+    }
+    const liveTranscript = pathname.match(/^\/api\/live\/transcripts\/([a-z0-9-]+)$/);
+    if (liveTranscript && method === 'DELETE') { const before = state.liveTranscripts?.length || 0; state.liveTranscripts = (state.liveTranscripts || []).filter((item) => item.id !== liveTranscript[1]); if (state.liveTranscripts.length === before) failure(404, 'Transcript not found.'); await save(state); return { ok: true }; }
 
     if (pathname === '/api/backup/export' && method === 'POST') { const passphrase = String(bodyOf(options).passphrase || ''); const backup = structuredClone(state); backup.providers = backup.providers.map(({ secret, ...provider }) => ({ ...provider, secret: '' })); const envelope = await window.HexiGridBrowserCrypto.encryptWithPassphrase({ format: 'hexigrid-standalone-backup', version: 1, state: backup }, passphrase); return { envelope, filename: `hexigrid-browser-backup-${new Date().toISOString().slice(0, 10)}.json` }; }
     if (pathname === '/api/backup/import' && method === 'POST') { const body = bodyOf(options); const decoded = await window.HexiGridBrowserCrypto.decryptWithPassphrase(body.envelope, String(body.passphrase || '')); if (decoded?.format !== 'hexigrid-standalone-backup' || !decoded.state?.settings || !Array.isArray(decoded.state.agents)) failure(400, 'This backup does not contain valid HexiGrid browser data.'); previousState = state; await vault().replaceFromBackup(decoded.state); return { ok: true, state: publicState(decoded.state) }; }
