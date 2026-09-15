@@ -28,6 +28,10 @@ import { agentInterfaceManifest } from './lib/agent-interface.mjs';
 import { verifyFirebaseIdToken } from './lib/firebase-auth.mjs';
 import { publicLiveTranscript, sanitizeLiveTranscript, sanitizeVoiceProfile } from './lib/live-communication.mjs';
 import { generateSpeechWithProvider } from './lib/speech-provider.mjs';
+import { createRealtimeCall } from './lib/realtime-provider.mjs';
+import { createCustomVoice } from './lib/custom-voice-provider.mjs';
+import { validateAvatarModelData } from './lib/avatar-model.mjs';
+import { QuickTunnel } from './lib/quick-tunnel.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_METADATA = JSON.parse(await fs.readFile(path.join(ROOT, 'package.json'), 'utf8'));
@@ -75,6 +79,7 @@ const pluginExecutions = new Map();
 const ilandsSetupPlans = new Map();
 const SERVER_INSTANCE_ID = crypto.randomUUID();
 const APP_VERSION = PACKAGE_METADATA.version;
+const quickTunnel = new QuickTunnel();
 const DEVELOPMENT_FRESH_START = await developmentResetEnabled(DATA_DIR);
 let startupReadOnly = false;
 let startupVaultWarningShown = false;
@@ -294,7 +299,7 @@ function safeProviderRecord(provider) {
     return {
       id: providerId,
       ...normalized,
-      capabilities: Array.isArray(safe.capabilities) ? safe.capabilities.filter((item) => ['chat', 'image', 'speech'].includes(item)).slice(0, 3) : ['chat'],
+      capabilities: Array.isArray(safe.capabilities) ? safe.capabilities.filter((item) => ['chat', 'image', 'speech', 'realtime'].includes(item)).slice(0, 4) : ['chat'],
       hasKey: provider?.hasKey === true,
       createdAt: typeof safe.createdAt === 'string' ? safe.createdAt.slice(0, 40) : undefined,
       lastCheckedAt: typeof safe.lastCheckedAt === 'string' ? safe.lastCheckedAt.slice(0, 40) : undefined,
@@ -359,7 +364,8 @@ function publicSettings() {
 }
 
 function publicAgent(agent) {
-  return { ...agent };
+  const model = state.media.find((item) => item.id === agent.avatarModelId && item.type === 'avatar-model');
+  return { ...agent, avatarModel: model ? { id: model.id, size: model.size, url: `/api/media/${model.id}` } : null };
 }
 
 function publicState() {
@@ -460,6 +466,14 @@ function isLoopbackHost(host = "") {
   return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
 
+function isTunnelRequest(req) {
+  return isLoopbackAddress(req.socket.remoteAddress) && quickTunnel.matchesRequest(req);
+}
+
+function isHostRequest(req) {
+  return isLoopbackAddress(req.socket.remoteAddress) && !isTunnelRequest(req);
+}
+
 function lanAddresses() {
   const addresses = [];
   for (const group of Object.values(os.networkInterfaces())) {
@@ -477,7 +491,7 @@ function cookieValue(req, name) {
 }
 
 function csrfToken(req) { return cookieValue(req, CSRF_COOKIE); }
-function secureCookieSuffix(req) { return req?.socket?.encrypted ? '; Secure' : ''; }
+function secureCookieSuffix(req) { return req?.socket?.encrypted || isTunnelRequest(req) ? '; Secure' : ''; }
 
 function csrfHeaders(req) {
   const existing = csrfToken(req) || crypto.randomBytes(24).toString('base64url');
@@ -519,7 +533,7 @@ async function verifyPassword(password, salt, expected) {
 }
 
 function sessionCookie(token, req) {
-  const secure = req.socket.encrypted ? '; Secure' : '';
+  const secure = secureCookieSuffix(req);
   return `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(sessionTtlMs / 1000)}${secure}`;
 }
 
@@ -548,7 +562,7 @@ function clearSession(req) {
   return `${AUTH_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`;
 }
 
-function loginKey(req) { return req.socket.remoteAddress || 'unknown'; }
+function loginKey(req) { return isTunnelRequest(req) ? `tunnel:${req.headers['cf-connecting-ip']}` : req.socket.remoteAddress || 'unknown'; }
 
 function loginLimit(req) {
   const key = loginKey(req);
@@ -621,7 +635,7 @@ function pairingPage(res) {
 
 function networkGate(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/pairing.css') return false;
-  if (isLoopbackHost(HOST) || isLoopbackAddress(req.socket.remoteAddress)) return false;
+  if (isHostRequest(req)) return false;
   if (safeEqual(cookieValue(req, "hexigrid_lan"), LAN_SESSION_TOKEN)) return false;
   const pair = url.searchParams.get("pair") || "";
   const limit = pairingLimit(req);
@@ -1055,10 +1069,16 @@ function bridgeStatus() {
     runnerMessaging: false,
     dashboardDirectMessaging: false,
     dashboardChatTransport: 'local-only',
+    liveMedia: {
+      supported: false,
+      transport: null,
+      reason: 'The current public iLands BYOA Runner contract does not expose camera, microphone, WebRTC, or dashboard chat transport. Live calls use the user-selected model provider instead.'
+    },
     supportedRunnerHarnesses: supportedRunnerHarnesses(),
     host: HOST,
     port: PORT,
-    checkedAt: now()
+    checkedAt: now(),
+    officialGuide: 'https://ilands.ai/agent.md'
   };
 }
 
@@ -1297,7 +1317,7 @@ async function route(req, res) {
 
   if (method === 'GET' && pathname === '/api/auth/status') return json(res, 200, authStatus(req), csrfHeaders(req));
   if (method === 'POST' && pathname === '/api/auth/setup') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Create the owner account on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Create the owner account on the computer running HexiGrid.' });
     const existingAuth = authStatus(req);
     if (state.settings.auth?.hash) return json(res, 409, { error: 'A local passcode is already configured.' });
     if (state.settings.auth?.configured && !existingAuth.authenticated) return json(res, 401, { error: 'Continue with the linked Google account before adding a local passcode.' });
@@ -1367,7 +1387,7 @@ async function route(req, res) {
     return json(res, 200, { ok: true, account: { email: identity.email, name: identity.name }, auth: { ...authStatus(req), authenticated: true } }, { 'set-cookie': startOrRefreshSession(req) });
   }
   if (method === 'POST' && pathname === '/api/auth/recover') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Recover the owner account on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Recover the owner account on the computer running HexiGrid.' });
     if (!state.settings.auth?.recoveryHash) return json(res, 409, { error: 'No recovery code is configured for this workspace.' });
     const limit = loginLimit(req);
     if (limit.blocked) return json(res, 429, { error: 'Too many recovery attempts. Try again later.', retryAfter: limit.retryAfter }, { 'retry-after': String(limit.retryAfter) });
@@ -1441,7 +1461,7 @@ async function route(req, res) {
   if (method === 'GET' && pathname === '/brand.js') { res.writeHead(200,securityHeaders('text/javascript; charset=utf-8')); return res.end(`const PRODUCT = Object.freeze(${JSON.stringify(BRAND)});`); }
 
   if (method === 'POST' && pathname === '/api/backup/export') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Create encrypted backup files on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Create encrypted backup files on the computer running HexiGrid.' });
     const body = await readBody(req);
     try {
       const envelope = encryptBackup(await backupPayload(), cleanString(body.passphrase).slice(0, 400));
@@ -1452,7 +1472,7 @@ async function route(req, res) {
     } catch (error) { return json(res, 400, { error: error.message }); }
   }
   if (method === 'POST' && pathname === '/api/backup/import') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Restore encrypted backup files on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Restore encrypted backup files on the computer running HexiGrid.' });
     const body = await readBody(req, MAX_BACKUP_BODY_BYTES);
     const denied = connectorPolicy('write_workspace', 'high', body.approved);
     if (denied) return json(res, denied.denied ? 403 : 409, denied);
@@ -1468,7 +1488,7 @@ async function route(req, res) {
     } catch (error) { return json(res, 400, { error: error.message }); }
   }
   if (method === 'POST' && pathname === '/api/backup/rollback') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Roll back a backup restore on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Roll back a backup restore on the computer running HexiGrid.' });
     if (!state.recovery?.lastRestoreAt) return json(res, 409, { error: 'There is no recent restore to roll back.' });
     const body = await readBody(req);
     const denied = connectorPolicy('write_workspace', 'high', body.approved);
@@ -1487,7 +1507,7 @@ async function route(req, res) {
   }
 
   if (pathname === '/api/plugins/install' && method === 'POST') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Install plugins on the computer that runs HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Install plugins on the computer that runs HexiGrid.' });
     const body = await readBody(req, MAX_PLUGIN_BODY_BYTES);
     try {
       const policy = evaluatePolicy({ approvalPolicy: state.settings.approvalPolicy, workMode: state.settings.workMode, capability: 'write_workspace', risk: 'high' });
@@ -1528,7 +1548,7 @@ async function route(req, res) {
   }
   const publisherMatch = pathname.match(/^\/api\/plugin-publishers\/([a-z0-9-]+)$/);
   if (publisherMatch && method === 'DELETE') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Revoke publisher trust on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Revoke publisher trust on the computer running HexiGrid.' });
     const body = await readBody(req);
     const denied = connectorPolicy('run_tools', 'high', body.approved);
     if (denied) return json(res, denied.denied ? 403 : 409, denied);
@@ -1562,7 +1582,7 @@ async function route(req, res) {
       return json(res, 200, { plugin: safePluginRecord(plugin) });
     }
     if (method === 'PUT' && pluginMatch[2] === 'secrets') {
-      if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Configure plugin credentials on the computer running HexiGrid.' });
+      if (!isHostRequest(req)) return json(res, 403, { error: 'Configure plugin credentials on the computer running HexiGrid.' });
       const body = await readBody(req);
       const denied = connectorPolicy('run_tools', 'high', body.approved);
       if (denied) return json(res, denied.denied ? 403 : 409, denied);
@@ -1625,7 +1645,7 @@ async function route(req, res) {
 
   if (pathname === '/api/mcp' && method === 'GET') return json(res, 200, { servers: state.mcpServers.map(publicMcpRecord) });
   if (pathname === '/api/mcp' && method === 'POST') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Add MCP servers on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Add MCP servers on the computer running HexiGrid.' });
     const body = await readBody(req);
     const denied = connectorPolicy('run_tools', body.transport === 'http' ? 'high' : 'medium', body.approved);
     if (denied) return json(res, denied.denied ? 403 : 409, denied);
@@ -1678,7 +1698,7 @@ async function route(req, res) {
       return json(res, 200, { server: publicMcpRecord(mcp) });
     }
     if (method === 'PUT' && action === 'secrets') {
-      if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Update MCP secrets on the host computer.' });
+      if (!isHostRequest(req)) return json(res, 403, { error: 'Update MCP secrets on the host computer.' });
       const body = await readBody(req); const secrets = cleanMcpSecrets(body.secrets);
       if (!Object.keys(secrets).length) { await credentialVault.remove(`mcp-${mcp.id}`); mcp.hasSecrets = false; }
       else { await credentialVault.set(`mcp-${mcp.id}`, JSON.stringify(secrets)); mcp.hasSecrets = true; }
@@ -1717,7 +1737,7 @@ async function route(req, res) {
     } catch (error) { return json(res, 400, { error: error.message }); }
   }
   if (pathname === '/api/providers' && method === 'POST') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res,403,{error:'Manage API keys on the host computer until encrypted device connections are configured.'});
+    if (!isHostRequest(req)) return json(res,403,{error:'Manage API keys on the host computer until encrypted device connections are configured.'});
     const body = await readBody(req);
     let config;
     try { config = validateProvider(body); } catch(error) { return json(res,400,{error:error.message}); }
@@ -1728,7 +1748,7 @@ async function route(req, res) {
       if (!discovery.models.length) return json(res, 422, { error: 'The service connected but did not list its models. Open Advanced settings and enter the model ID supplied by that service.' });
       config.modelIds = discovery.models;
     }
-    const provider = { ...config, id:id('provider'), capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item) => ['chat', 'image', 'speech'].includes(item)) : ['chat'], hasKey:Boolean(body.apiKey), createdAt:now(), lastCheckedAt: discovery ? now() : undefined, lastError: '' };
+    const provider = { ...config, id:id('provider'), capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((item) => ['chat', 'image', 'speech', 'realtime'].includes(item)) : ['chat'], hasKey:Boolean(body.apiKey), createdAt:now(), lastCheckedAt: discovery ? now() : undefined, lastError: '' };
     if (!provider.capabilities.length) provider.capabilities = ['chat'];
     if (body.apiKey) await credentialVault.set(provider.id,body.apiKey);
     state.providers.push(provider);
@@ -1752,7 +1772,7 @@ async function route(req, res) {
     }
     if (method === 'PUT' && providerMatch[2] === 'key') {
       if (isOnDeviceProvider(provider)) return json(res, 409, { error: 'On-device models do not use API keys.' });
-      if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res,403,{error:'Update keys on the host computer.'});
+      if (!isHostRequest(req)) return json(res,403,{error:'Update keys on the host computer.'});
       const body = await readBody(req);
       if (body.apiKey) await credentialVault.set(provider.id,body.apiKey); else await credentialVault.remove(provider.id);
       provider.hasKey = Boolean(body.apiKey);
@@ -1807,6 +1827,55 @@ async function route(req, res) {
       return json(res, 201, { media: { id: clipId, type: 'audio', mimeType: generated.mimeType, model, voice: cleanString(body.voice).slice(0, 200), size: generated.bytes.length, url: `/api/live/speech/${clipId}`, expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() }, receipt: state.receipts[0] });
     } catch (error) { addReceipt({ action: 'generate_speech', capability: 'generate_media', risk: provider.local ? 'low' : 'medium', status: 'failed', detail: error.message, source: 'provider' }); await saveState(); return json(res, 502, { error: error.message }); }
   }
+  if (pathname === '/api/live/realtime/call' && method === 'POST') {
+    const body = await readBody(req);
+    const provider = state.providers.find((item) => item.id === cleanString(body.providerId));
+    if (!provider || !provider.enabled || !provider.capabilities?.includes('realtime')) return json(res, 400, { error: 'Choose a connected provider configured for realtime calling.' });
+    const model = cleanString(body.model).slice(0, 240);
+    if (!model || !provider.modelIds.includes(model)) return json(res, 400, { error: 'Choose one of this provider’s configured realtime models.' });
+    const agent = findAgent(cleanString(body.agentId));
+    if (!agent) return json(res, 404, { error: 'Choose an agent before starting the call.' });
+    const policy = evaluatePolicy({ approvalPolicy: state.settings.approvalPolicy, workMode: state.settings.workMode, capability: 'conversation', risk: 'medium' });
+    if (policy.decision === 'deny') return json(res, 403, { error: policy.reason, denied: true, policy });
+    if (policy.decision === 'ask' && body.approved !== true) return json(res, 409, { error: policy.reason, approvalRequired: true, policy });
+    const instructions = [
+      `You are ${agent.name}, speaking with the owner in a live voice call.`,
+      agent.personality,
+      agent.instructions,
+      agent.rules,
+      agent.useGlobalCommunication !== false ? compileCommunicationPrompt(state.settings.communicationGuide) : ''
+    ].filter(Boolean).join('\n\n').slice(0, 12000);
+    try {
+      const secret = provider.hasKey ? await credentialVault.get(provider.id) : '';
+      const result = await createRealtimeCall(provider, secret, { sdp: body.sdp, model, voice: body.voice, instructions });
+      addReceipt({ action: 'realtime_call_start', capability: 'conversation', risk: 'medium', status: 'completed', detail: `${provider.name} started a realtime voice call for ${agent.name}.`, source: 'provider' });
+      addActivity('media', `A realtime voice call started with ${agent.name}.`); await saveState();
+      return json(res, 201, { answerSdp: result.answerSdp, receipt: state.receipts[0] });
+    } catch (error) {
+      addReceipt({ action: 'realtime_call_start', capability: 'conversation', risk: 'medium', status: 'failed', detail: error.message, source: 'provider' }); await saveState();
+      return json(res, 502, { error: error.message });
+    }
+  }
+  if (pathname === '/api/live/custom-voice' && method === 'POST') {
+    const body = await readBody(req, 29 * 1024 * 1024);
+    const provider = state.providers.find((item) => item.id === cleanString(body.providerId));
+    if (!provider || !provider.enabled || !provider.capabilities?.includes('speech')) return json(res, 400, { error: 'Choose a connected speech provider first.' });
+    const agent = findAgent(cleanString(body.agentId));
+    if (!agent) return json(res, 404, { error: 'Choose an agent before creating a voice.' });
+    const policy = evaluatePolicy({ approvalPolicy: state.settings.approvalPolicy, workMode: state.settings.workMode, capability: 'generate_media', risk: 'high' });
+    if (policy.decision === 'deny') return json(res, 403, { error: policy.reason, denied: true, policy });
+    if (policy.decision === 'ask' && body.approved !== true) return json(res, 409, { error: policy.reason, approvalRequired: true, policy });
+    try {
+      const secret = provider.hasKey ? await credentialVault.get(provider.id) : '';
+      const voice = await createCustomVoice(provider, secret, body);
+      addReceipt({ action: 'custom_voice_create', capability: 'generate_media', risk: 'high', status: 'completed', detail: `${provider.name} created a consented custom voice for ${agent.name}. Audio was not stored by HexiGrid.`, source: 'provider' });
+      addActivity('media', `A consented custom voice was created for ${agent.name}.`); await saveState();
+      return json(res, 201, { voice, receipt: state.receipts[0] });
+    } catch (error) {
+      addReceipt({ action: 'custom_voice_create', capability: 'generate_media', risk: 'high', status: 'failed', detail: error.message, source: 'provider' }); await saveState();
+      return json(res, 502, { error: error.message });
+    }
+  }
   if (pathname === '/api/media/images' && method === 'POST') {
     const body = await readBody(req);
     const provider = state.providers.find((item) => item.id === cleanString(body.providerId));
@@ -1843,7 +1912,7 @@ async function route(req, res) {
     if (!item) return json(res, 404, { error: 'Media not found.' });
     const body = await readBody(req); const denied = connectorPolicy('write_workspace', 'high', body.approved);
     if (denied) return json(res, denied.denied ? 403 : 409, denied);
-    const filename = safeDataFilename(item.filename); await fs.rm(path.join(MEDIA_DIR, filename), { force: true }); state.media = state.media.filter((entry) => entry.id !== item.id); addActivity('media', `Removed ${filename}.`); await saveState(); return json(res, 200, { ok: true });
+    const filename = safeDataFilename(item.filename); await fs.rm(path.join(MEDIA_DIR, filename), { force: true }); state.media = state.media.filter((entry) => entry.id !== item.id); for (const agent of state.agents) if (agent.avatarModelId === item.id) agent.avatarModelId = ''; addActivity('media', `Removed ${filename}.`); await saveState(); return json(res, 200, { ok: true });
   }
   if (method === "GET" && pathname === "/api/bridge") return json(res, 200, bridgeStatus());
   if (method === "GET" && pathname === "/api/ilands/status") return json(res, 200, await officialRunnerStatus());
@@ -1868,7 +1937,7 @@ async function route(req, res) {
     return json(res, 201, { profile: { ...profile, home: undefined, runtime: managedRunnerStatus(profile.id) } });
   }
   if (method === 'POST' && pathname === '/api/ilands/install/plan') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Install Runner on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Install Runner on the computer running HexiGrid.' });
     const body = await readBody(req);
     const denied = connectorPolicy('network_read', 'medium', body.approved);
     if (denied) return json(res, denied.denied ? 403 : 409, denied);
@@ -1886,7 +1955,7 @@ async function route(req, res) {
     }
   }
   if (method === 'POST' && pathname === '/api/ilands/install') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Prepare Runner setup on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Prepare Runner setup on the computer running HexiGrid.' });
     const body = await readBody(req);
     const denied = connectorPolicy('external_write', 'high', body.approved);
     if (denied) return json(res, denied.denied ? 403 : 409, denied);
@@ -1960,9 +2029,33 @@ async function route(req, res) {
       secure: TLS_ENABLED,
       host: HOST,
       port: PORT,
-      pairingCode: enabled && isLoopbackAddress(req.socket.remoteAddress) ? LAN_PAIR_CODE : null,
-      urls: enabled ? lanAddresses().map((address) => `${SERVER_SCHEME}://${address}:${PORT}/`) : []
+      pairingCode: (enabled || quickTunnel.status().running) && isHostRequest(req) ? LAN_PAIR_CODE : null,
+      urls: enabled ? lanAddresses().map((address) => `${SERVER_SCHEME}://${address}:${PORT}/`) : [],
+      tunnel: quickTunnel.status()
     });
+  }
+  if (pathname === '/api/network/tunnel' && (method === 'POST' || method === 'DELETE')) {
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Remote links can only be managed on the computer running HexiGrid.' });
+    const body = await readBody(req);
+    if (method === 'POST') {
+      if (!state.settings.auth?.configured) return json(res, 409, { error: 'Create an owner passcode before opening a remote link.' });
+      const denied = connectorPolicy('external_write', 'high', body.approved);
+      if (denied) return json(res, denied.denied ? 403 : 409, denied);
+      try {
+        const tunnel = await quickTunnel.start(`http://127.0.0.1:${PORT}`);
+        addReceipt({ action: 'remote-link:start', capability: 'external_write', risk: 'high', status: 'completed', detail: 'A temporary Cloudflare Quick Tunnel opened. Remote devices still require the rotating pairing code and owner sign-in.', source: 'network' });
+        await saveState();
+        return json(res, 200, { tunnel, pairingCode: LAN_PAIR_CODE });
+      } catch (error) {
+        addReceipt({ action: 'remote-link:start', capability: 'external_write', risk: 'high', status: 'failed', detail: error.message, source: 'network' });
+        await saveState();
+        return json(res, 502, { error: error.message, tunnel: quickTunnel.status() });
+      }
+    }
+    quickTunnel.stop();
+    addReceipt({ action: 'remote-link:stop', capability: 'external_write', risk: 'medium', status: 'completed', detail: 'The temporary remote link was closed.', source: 'network' });
+    await saveState();
+    return json(res, 200, { tunnel: quickTunnel.status() });
   }
   if (method === "GET" && pathname === "/api/models") return json(res, 200, { models: modelCatalog, selected: state.settings.model, policy: state.settings.modelPolicy, error: modelCatalogError });
   if (method === "POST" && pathname === "/api/models/refresh") {
@@ -1976,7 +2069,7 @@ async function route(req, res) {
   }
   const harnessMatch = pathname.match(/^\/api\/harnesses\/(opencode|claude-code|codex)$/);
   if (harnessMatch && method === 'POST') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Connect local command-line tools on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Connect local command-line tools on the computer running HexiGrid.' });
     await refreshHarnessDetection();
     const status = detectedHarnesses.find((item) => item.id === harnessMatch[1]);
     if (!status?.installed) return json(res, 409, { error: `${status?.label || 'That tool'} is not installed on this computer.` });
@@ -1990,7 +2083,7 @@ async function route(req, res) {
     return json(res, 200, { harness: { ...status, connected: true }, models: modelCatalog });
   }
   if (harnessMatch && method === 'DELETE') {
-    if (!isLoopbackAddress(req.socket.remoteAddress)) return json(res, 403, { error: 'Disconnect local command-line tools on the computer running HexiGrid.' });
+    if (!isHostRequest(req)) return json(res, 403, { error: 'Disconnect local command-line tools on the computer running HexiGrid.' });
     const before = state.harnessConnections.length;
     state.harnessConnections = state.harnessConnections.filter((item) => item.id !== harnessMatch[1]);
     if (before === state.harnessConnections.length) return json(res, 404, { error: 'That tool is not connected.' });
@@ -2160,6 +2253,37 @@ async function route(req, res) {
       if (body.category !== undefined) memory.category = cleanString(body.category, 'General').slice(0, 60); if (body.importance !== undefined) memory.importance = Math.min(5, Math.max(1, Number(body.importance) || 3)); memory.updatedAt = now(); await saveState(); return json(res, 200, { memory });
     }
     if (method === 'DELETE') { state.memories = state.memories.filter((item) => item.id !== memory.id); addActivity('memory', 'An owner-managed agent memory was removed.'); await saveState(); return json(res, 200, { ok: true }); }
+  }
+
+  const avatarModelMatch = pathname.match(/^\/api\/agents\/([^/]+)\/avatar-model$/);
+  if (avatarModelMatch && method === 'POST') {
+    const agent = findAgent(avatarModelMatch[1]);
+    if (!agent) return json(res, 404, { error: 'Agent not found.' });
+    const body = await readBody(req, 12 * 1024 * 1024);
+    const policy = evaluatePolicy({ approvalPolicy: state.settings.approvalPolicy, workMode: state.settings.workMode, capability: 'conversation', risk: 'medium' });
+    if (policy.decision === 'deny') return json(res, 403, { error: policy.reason, denied: true, policy });
+    if (policy.decision === 'ask' && body.approved !== true) return json(res, 409, { error: policy.reason, approvalRequired: true, policy });
+    try {
+      const model = validateAvatarModelData(body.modelData);
+      const mediaId = id('avatar-model'); const filename = `${mediaId}.glb`;
+      await fs.writeFile(path.join(MEDIA_DIR, filename), model.bytes, { mode: 0o600, flag: 'wx' });
+      const prior = state.media.find((item) => item.id === agent.avatarModelId && item.type === 'avatar-model');
+      const item = { id: mediaId, type: 'avatar-model', filename, mimeType: model.mimeType, size: model.bytes.length, agentId: agent.id, createdAt: now() };
+      state.media.unshift(item); agent.avatarModelId = mediaId; agent.updatedAt = now();
+      if (prior) { await fs.rm(path.join(MEDIA_DIR, safeDataFilename(prior.filename)), { force: true }); state.media = state.media.filter((entry) => entry.id !== prior.id); }
+      addReceipt({ action: 'avatar_model_save', capability: 'conversation', risk: 'medium', status: 'completed', detail: `A self-contained 3D avatar was saved locally for ${agent.name}.`, source: 'owner' }); await saveState();
+      return json(res, 201, { agent: publicAgent(agent), receipt: state.receipts[0] });
+    } catch (error) { return json(res, error.status || 400, { error: error.message }); }
+  }
+  if (avatarModelMatch && method === 'DELETE') {
+    const agent = findAgent(avatarModelMatch[1]);
+    if (!agent) return json(res, 404, { error: 'Agent not found.' });
+    const body = await readBody(req); const denied = connectorPolicy('conversation', 'medium', body.approved);
+    if (denied) return json(res, denied.denied ? 403 : 409, denied);
+    const prior = state.media.find((item) => item.id === agent.avatarModelId && item.type === 'avatar-model');
+    if (prior) await fs.rm(path.join(MEDIA_DIR, safeDataFilename(prior.filename)), { force: true });
+    state.media = state.media.filter((entry) => entry.id !== agent.avatarModelId); agent.avatarModelId = ''; agent.updatedAt = now(); await saveState();
+    return json(res, 200, { agent: publicAgent(agent) });
   }
 
   const agentMatch = pathname.match(/^\/api\/agents\/([^/]+)$/);
@@ -2569,6 +2693,7 @@ function shutdown() {
   for (const controller of activeTaskRuns.values()) controller.abort();
   stopAllRunnerJobs();
   stopAllManagedRunners();
+  quickTunnel.stop();
   server.close(async () => { await removeRuntimeIdentity(); await removeInstanceLock(); process.exit(0); });
   setTimeout(() => process.exit(1), 5000).unref?.();
 }

@@ -18,6 +18,9 @@ function openAgentModal(agentId = null) {
   const item = agentId ? agent(agentId) : null;
   state.editingAgentId = item?.id || null;
   state.avatarDraft = item?.avatarImage || "";
+  clearAvatarModelDraft(false);
+  state.avatarModelDraft = item?.avatarModel || null;
+  state.avatarModelRemove = false;
   $("#modalTitle").textContent = item ? `Edit ${item.name}` : "Add an agent";
   $("#deleteAgentBtn").classList.toggle("hidden", !item);
   $("#agentId").value = item?.id || "";
@@ -38,11 +41,47 @@ function openAgentModal(agentId = null) {
 function openConnectModal() { $("#connectModal").classList.remove("hidden"); document.body.classList.add("overlay-open"); }
 function closeConnectModal() { $("#connectModal").classList.add("hidden"); document.body.classList.remove("overlay-open"); }
 
-function closeAgentModal() { $("#agentModal").classList.add("hidden"); state.editingAgentId = null; state.avatarDraft = ""; $("#agentPhotoInput").value = ""; document.body.classList.remove("overlay-open"); }
+function closeAgentModal() { $("#agentModal").classList.add("hidden"); state.editingAgentId = null; state.avatarDraft = ""; $("#agentPhotoInput").value = ""; $("#agentModelInput").value = ""; clearAvatarModelDraft(false); document.body.classList.remove("overlay-open"); }
 
 function renderAgentPhoto(name = $("#agentName").value || "Agent", color = "#8d7dff") {
   const preview = $("#agentPhotoPreview");
   preview.innerHTML = state.avatarDraft ? `${colorTile(color)}<img class="avatar-photo" src="${escapeHtml(state.avatarDraft)}" alt="Profile picture preview" />` : `${colorTile(color)}<span class="avatar-initials">${escapeHtml(initials(name))}</span>`;
+  const modelPreview = $("#agentModelPreview");
+  const modelUrl = state.avatarModelObjectUrl || state.avatarModelDraft?.url;
+  modelPreview.innerHTML = modelUrl ? window.HexiGridAvatarViewer.element(modelUrl, `${name} 3D avatar preview`, 'agent-model-viewer') : '<span>3D</span>';
+}
+
+function clearAvatarModelDraft(markForRemoval) {
+  if (state.avatarModelObjectUrl) URL.revokeObjectURL(state.avatarModelObjectUrl);
+  state.avatarModelObjectUrl = "";
+  state.avatarModelFile = null;
+  state.avatarModelDraft = null;
+  state.avatarModelRemove = Boolean(markForRemoval);
+}
+
+function chooseAvatarModel(file) {
+  if (!file || (!file.name.toLowerCase().endsWith('.glb') && file.type !== 'model/gltf-binary')) throw new Error('Choose a GLB 3D model file.');
+  if (file.size < 20 || file.size > 8 * 1024 * 1024) throw new Error('Choose a GLB model smaller than 8 MB.');
+  clearAvatarModelDraft(false);
+  state.avatarModelFile = file;
+  state.avatarModelObjectUrl = URL.createObjectURL(file);
+}
+
+async function modelDataUrl(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return `data:model/gltf-binary;base64,${btoa(binary)}`;
+}
+
+async function saveAvatarModel(agentId, modelData, approved = false) {
+  try { return await api(`/api/agents/${agentId}/avatar-model`, { method: 'POST', body: JSON.stringify({ modelData, approved }) }); }
+  catch (error) {
+    if (!error.body?.approvalRequired) throw error;
+    const accepted = await userConfirm('Save this 3D avatar?', 'The GLB model will be validated and stored only in HexiGrid’s local data folder.', 'Save 3D avatar');
+    if (!accepted) throw new Error('3D avatar upload cancelled.');
+    return saveAvatarModel(agentId, modelData, true);
+  }
 }
 
 async function resizeProfileImage(file) {
@@ -80,9 +119,11 @@ async function saveAgent(event) {
     avatarImage: state.avatarDraft
   };
   try {
-    const response = state.editingAgentId
+    let response = state.editingAgentId
       ? await api(`/api/agents/${state.editingAgentId}`, { method: "PATCH", body: JSON.stringify(payload) })
       : await api("/api/agents", { method: "POST", body: JSON.stringify(payload) });
+    if (state.avatarModelFile) response = await saveAvatarModel(response.agent.id, await modelDataUrl(state.avatarModelFile));
+    else if (state.avatarModelRemove) response = await api(`/api/agents/${response.agent.id}/avatar-model`, { method: 'DELETE', body: JSON.stringify({ approved: true }) });
     const index = state.data.agents.findIndex((item) => item.id === response.agent.id);
     if (index >= 0) state.data.agents[index] = response.agent; else state.data.agents.push(response.agent);
     closeAgentModal(); renderAll(); notify(`${response.agent.name} saved locally.`);

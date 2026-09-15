@@ -4,6 +4,10 @@ const state = {
   activeRoomId: null,
   editingAgentId: null,
   avatarDraft: "",
+  avatarModelDraft: null,
+  avatarModelFile: null,
+  avatarModelRemove: false,
+  avatarModelObjectUrl: "",
   onboardingStep: 0,
   network: null,
   usagePeriod: "week",
@@ -264,12 +268,24 @@ function renderNetwork() {
   if (!network) return;
   const badge = $("#networkBadge");
   const button = $("#copyMobileAddress");
+  const remoteButton = $("#remoteLinkButton");
   if (network.standaloneBrowser) {
     badge.textContent = "STANDALONE";
     badge.className = "status-badge";
     $("#networkDescription").textContent = "This browser works independently for direct-capable cloud APIs and supported on-device models. Pair a host only for desktop files, CLIs, isolated tools, or background work.";
     $("#networkDetails").innerHTML = `<div><span>Cloud requests</span><strong>Direct from this browser</strong></div><div><span>Local protection</span><strong>Passcode-derived AES-256 vault</strong></div>`;
     button.disabled = true;
+    remoteButton.disabled = true;
+    return;
+  }
+  remoteButton.disabled = false;
+  remoteButton.textContent = network.tunnel?.running ? "Close temporary remote link" : network.tunnel?.starting ? "Opening remote link…" : "Open temporary remote link";
+  if (network.tunnel?.running) {
+    badge.textContent = "REMOTE LINK OPEN";
+    badge.className = "status-badge warn";
+    $("#networkDescription").textContent = "This temporary public link closes when HexiGrid stops. Anyone opening it must enter the pairing code and then sign in.";
+    $("#networkDetails").innerHTML = `<div><span>Temporary address</span><strong>${escapeHtml(network.tunnel.url)}</strong></div><div><span>Pairing code</span><strong>${escapeHtml(network.pairingCode || "Shown only on the host computer")}</strong></div>`;
+    button.disabled = !network.pairingCode;
     return;
   }
   if (!network.enabled) {
@@ -462,12 +478,27 @@ async function loadNetwork() {
 }
 
 async function copyMobileAddress() {
-  const url = state.network?.urls?.[0];
+  const url = state.network?.tunnel?.running ? state.network.tunnel.url : state.network?.urls?.[0];
   const code = state.network?.pairingCode;
   if (!url || !code) return notify("Turn on private-network mode first.", true);
   const pairingUrl = `${url}/?pair=${encodeURIComponent(code)}`;
   try { await navigator.clipboard.writeText(pairingUrl); notify("Private phone pairing link copied."); }
   catch { await userInput("Phone address", "Copy this address", pairingUrl, { required: false, accept: "Done" }); }
+}
+
+async function toggleRemoteLink() {
+  const running = state.network?.tunnel?.running;
+  if (running) {
+    if (!await userConfirm("Close remote link?", "Devices using the temporary link will disconnect now.", "Close link", true)) return;
+    await api('/api/network/tunnel', { method: 'DELETE', body: JSON.stringify({ approved: true }) });
+    notify('Temporary remote link closed.');
+  } else {
+    if (!await userConfirm("Open a temporary remote link?", "This uses Cloudflare Quick Tunnel. The random link is public, but HexiGrid still requires the pairing code and your owner sign-in. Use Connect mode, and close it when the call ends.", "Open link")) return;
+    const result = await api('/api/network/tunnel', { method: 'POST', body: JSON.stringify({ approved: true }) });
+    notify('Temporary remote link opened.');
+    state.network = { ...state.network, tunnel: result.tunnel, pairingCode: result.pairingCode };
+  }
+  await loadNetwork();
 }
 
 async function installPwa() {
@@ -560,8 +591,10 @@ document.addEventListener("click", async (event) => {
   if (action === "finish-to-guide") finishOnboarding("guide");
   if (action === "save-owner") updateSettings({ owner: { displayName: $("#ownerName").value } }, "Local profile saved.", true);
   if (action === "copy-mobile-address") copyMobileAddress();
+  if (action === "toggle-remote-link") toggleRemoteLink().catch((error) => notify(error.message, true));
   if (action === "install-pwa") installPwa();
   if (action === "remove-agent-photo") { state.avatarDraft = ""; renderAgentPhoto(); }
+  if (action === "remove-agent-model") { clearAvatarModelDraft(true); renderAgentPhoto(); }
   if (target.dataset.usagePeriod) { state.usagePeriod = target.dataset.usagePeriod; renderUsage(); }
 });
 
@@ -590,6 +623,10 @@ $("#agentForm").addEventListener("submit", saveAgent);
 $("#agentName").addEventListener("input", () => { if (!state.avatarDraft) renderAgentPhoto(); });
 $("#agentPhotoInput").addEventListener("change", async (event) => {
   try { state.avatarDraft = await resizeProfileImage(event.target.files?.[0]); renderAgentPhoto(); }
+  catch (error) { notify(error.message, true); event.target.value = ""; }
+});
+$("#agentModelInput").addEventListener("change", (event) => {
+  try { chooseAvatarModel(event.target.files?.[0]); renderAgentPhoto(); }
   catch (error) { notify(error.message, true); event.target.value = ""; }
 });
 $("#deleteAgentBtn").addEventListener("click", deleteAgent);

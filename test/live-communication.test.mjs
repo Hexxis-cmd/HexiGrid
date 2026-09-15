@@ -12,6 +12,14 @@ const port = 43934;
 let child;
 let dataDir;
 
+function avatarGlbData() {
+  const raw = Buffer.from(JSON.stringify({ asset: { version: '2.0' }, scenes: [{ nodes: [] }], scene: 0 }));
+  const json = Buffer.concat([raw, Buffer.alloc((4 - raw.length % 4) % 4, 0x20)]);
+  const bytes = Buffer.alloc(20 + json.length);
+  bytes.write('glTF'); bytes.writeUInt32LE(2, 4); bytes.writeUInt32LE(bytes.length, 8); bytes.writeUInt32LE(json.length, 12); bytes.writeUInt32LE(0x4E4F534A, 16); json.copy(bytes, 20);
+  return `data:model/gltf-binary;base64,${bytes.toString('base64')}`;
+}
+
 async function waitForServer() {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try { if ((await fetch(`http://127.0.0.1:${port}/api/bootstrap`)).ok) return; } catch { /* startup is still in progress */ }
@@ -64,11 +72,17 @@ test('live media assets and same-origin media permissions are wired', async () =
   const script = await fetch(`http://127.0.0.1:${port}/live-call.js`);
   const recording = await fetch(`http://127.0.0.1:${port}/live-recording.js`);
   const generatedVoice = await fetch(`http://127.0.0.1:${port}/live-generated-voice.js`);
+  const realtime = await fetch(`http://127.0.0.1:${port}/live-realtime.js`);
+  const avatarViewer = await fetch(`http://127.0.0.1:${port}/avatar-viewer.js`);
+  const modelViewer = await fetch(`http://127.0.0.1:${port}/vendor/model-viewer.js`);
   const style = await fetch(`http://127.0.0.1:${port}/live-communication.css`);
   const page = await fetch(`http://127.0.0.1:${port}/`);
   assert.equal(script.status, 200);
   assert.equal(recording.status, 200);
   assert.equal(generatedVoice.status, 200);
+  assert.equal(realtime.status, 200);
+  assert.equal(avatarViewer.status, 200);
+  assert.equal(modelViewer.status, 200);
   assert.equal(style.status, 200);
   const liveCss = await style.text();
   assert.match(liveCss, /\.live-stage>\.module-header,\.live-conversation>\.module-header,\.live-voice-panel>\.module-header[^}]*grid-template-columns:minmax\(0,1fr\) auto/);
@@ -77,8 +91,14 @@ test('live media assets and same-origin media permissions are wired', async () =
   assert.match(html, /live-call\.js/);
   assert.match(html, /live-recording\.js/);
   assert.match(html, /live-generated-voice\.js/);
+  assert.match(html, /live-realtime\.js/);
+  assert.match(html, /avatar-viewer\.js/);
   assert.match(page.headers.get('permissions-policy'), /camera=\(self\)/);
   assert.match(page.headers.get('permissions-policy'), /microphone=\(self\)/);
+  assert.match(html, /data-action="toggle-remote-link"/);
+  const appSource = await (await fetch(`http://127.0.0.1:${port}/app.js`)).text();
+  assert.match(appSource, /Open temporary remote link/);
+  assert.match(appSource, /pairing code and your owner sign-in/);
 });
 
 test('voice and recording modules use real browser capability checks', async () => {
@@ -92,7 +112,27 @@ test('voice and recording modules use real browser capability checks', async () 
   const call = await (await fetch(`http://127.0.0.1:${port}/live-call.js`)).text();
   assert.match(call, /Attach current frame/);
   assert.match(call, /imageDataUrl: pendingFrame/);
+  assert.match(call, /frameFromPreview/);
+  const realtimeSource = await (await fetch(`http://127.0.0.1:${port}/live-realtime.js`)).text();
+  assert.match(realtimeSource, /type: 'input_image'/);
+  assert.match(realtimeSource, /bufferedAmount > 512 \* 1024/);
+  assert.match(realtimeSource, /Math\.min\(1, Math\.max\(\.25/);
   const stopVoice = call.match(/function stopReply\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
   assert.match(stopVoice, /HexiGridLiveVoice\?\.stop/);
   assert.doesNotMatch(stopVoice, /turnController\?\.abort/);
+});
+
+test('3D agent avatar uploads, serves, and removes a validated local GLB', async () => {
+  const created = await request('/api/agents', 'POST', { name: '3D avatar agent', transport: 'local-opencode' });
+  const uploaded = await request(`/api/agents/${created.body.agent.id}/avatar-model`, 'POST', { modelData: avatarGlbData(), approved: true });
+  assert.equal(uploaded.response.status, 201);
+  assert.match(uploaded.body.agent.avatarModel.url, /^\/api\/media\/avatar-model-/);
+  const model = await fetch(`http://127.0.0.1:${port}${uploaded.body.agent.avatarModel.url}`);
+  assert.equal(model.status, 200);
+  assert.equal(model.headers.get('content-type'), 'model/gltf-binary');
+  assert.equal(Buffer.from(await model.arrayBuffer()).toString('ascii', 0, 4), 'glTF');
+  const removed = await request(`/api/agents/${created.body.agent.id}/avatar-model`, 'DELETE', { approved: true });
+  assert.equal(removed.response.status, 200);
+  assert.equal(removed.body.agent.avatarModel, null);
+  assert.equal((await fetch(`http://127.0.0.1:${port}${uploaded.body.agent.avatarModel.url}`)).status, 404);
 });

@@ -49,6 +49,12 @@
     if ([...roomSelect.options].some((option) => option.value === priorRoom)) roomSelect.value = priorRoom;
     const presence = document.querySelector('#liveAgentPresence');
     if (presence) presence.textContent = selectedAgent()?.name || 'Choose an agent';
+    const modelStage = document.querySelector('#liveAvatarModel');
+    if (modelStage) {
+      const current = selectedAgent();
+      modelStage.innerHTML = current?.avatarModel ? window.HexiGridAvatarViewer?.element(current.avatarModel.url, `${current.name} 3D avatar`, 'live-avatar-viewer') || '' : '';
+      modelStage.hidden = !current?.avatarModel;
+    }
     document.querySelector('#liveNoAgent')?.classList.toggle('hidden', Boolean(state.data.agents.length));
     window.HexiGridLiveVoice?.render();
     window.HexiGridGeneratedVoice?.render();
@@ -137,15 +143,15 @@
     const capture = document.querySelector('#liveCaptureFrame'); if (capture) capture.textContent = 'Attach current frame';
   }
 
-  function frameFromPreview() {
+  function frameFromPreview(maxDimension = 720, quality = .76) {
     const video = screenStream ? document.querySelector('#liveScreenVideo') : document.querySelector('#liveLocalVideo');
     if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return '';
-    const scale = Math.min(1, 720 / Math.max(video.videoWidth, video.videoHeight));
+    const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     canvas.getContext('2d', { alpha: false }).drawImage(video, 0, 0, canvas.width, canvas.height);
-    let frame = canvas.toDataURL('image/jpeg', .76);
+    let frame = canvas.toDataURL('image/jpeg', quality);
     if (frame.length > 1400 * 1024) frame = canvas.toDataURL('image/jpeg', .55);
     return frame;
   }
@@ -282,7 +288,7 @@
     const section = document.createElement('section'); section.id = 'view-live'; section.className = 'view'; section.innerHTML = `
       <div class="page-intro"><div><div class="eyebrow">LIVE COMMUNICATION</div><h2>Talk to one agent</h2><p>Speak naturally, hear replies, and optionally open a private camera preview. Camera and screen video stay on this device; they are not sent to the agent.</p></div><span id="liveStatus" class="status-badge">Ready</span></div>
       <div class="live-layout">
-        <section class="panel live-stage"><header class="module-header"><div><div class="eyebrow">PRIVATE PREVIEW</div><h3>Camera and screen</h3></div><span class="status-badge" id="livePrivacyBadge">LOCAL ONLY</span></header><div class="live-video-stage"><div id="liveMediaEmpty" class="live-media-empty"><span class="live-core">◈</span><strong>Camera is off</strong><p>Press Start camera + mic when you are ready. The browser will ask for permission.</p></div><video id="liveLocalVideo" class="live-video" autoplay muted playsinline hidden></video><video id="liveScreenVideo" class="live-screen-video" autoplay muted playsinline hidden></video><div class="live-agent-presence"><span class="presence-wave"><i></i><i></i><i></i></span><strong id="liveAgentPresence">Choose an agent</strong><small>Agent replies appear as text and can be read aloud by this browser.</small></div></div><div class="live-controls"><button class="primary-button" id="liveStartMedia" type="button" data-live-action="start-media">Start camera + mic</button><button class="secondary-button" id="liveMuteMic" type="button" data-live-action="mute" disabled>Mute mic</button><button class="secondary-button" id="liveToggleCamera" type="button" data-live-action="camera" disabled>Turn camera off</button><button class="secondary-button" id="liveShareScreen" type="button" data-live-action="screen">Preview screen</button><button class="ghost-button" id="liveStopMedia" type="button" data-live-action="stop-media" disabled>Stop media</button></div><div id="liveRecordingControls" class="live-recording-controls"></div><p id="liveSupportHint" class="microcopy">The agent cannot see this preview. Nothing records automatically; recording requires a separate click and saves directly to your device.</p></section>
+        <section class="panel live-stage"><header class="module-header"><div><div class="eyebrow">PRIVATE PREVIEW</div><h3>Camera and screen</h3></div><span class="status-badge" id="livePrivacyBadge">LOCAL ONLY</span></header><div class="live-video-stage"><div id="liveMediaEmpty" class="live-media-empty"><span class="live-core">◈</span><strong>Camera is off</strong><p>Press Start camera + mic when you are ready. The browser will ask for permission.</p></div><div id="liveAvatarModel" class="live-avatar-model" hidden></div><video id="liveLocalVideo" class="live-video" autoplay muted playsinline hidden></video><video id="liveScreenVideo" class="live-screen-video" autoplay muted playsinline hidden></video><div class="live-agent-presence"><span class="presence-wave"><i></i><i></i><i></i></span><strong id="liveAgentPresence">Choose an agent</strong><small>Agent replies appear as text and can be read aloud by this browser.</small></div></div><div class="live-controls"><button class="primary-button" id="liveStartMedia" type="button" data-live-action="start-media">Start camera + mic</button><button class="secondary-button" id="liveMuteMic" type="button" data-live-action="mute" disabled>Mute mic</button><button class="secondary-button" id="liveToggleCamera" type="button" data-live-action="camera" disabled>Turn camera off</button><button class="secondary-button" id="liveShareScreen" type="button" data-live-action="screen">Preview screen</button><button class="ghost-button" id="liveStopMedia" type="button" data-live-action="stop-media" disabled>Stop media</button></div><div id="liveRecordingControls" class="live-recording-controls"></div><p id="liveSupportHint" class="microcopy">The agent cannot see this preview. Nothing records automatically; recording requires a separate click and saves directly to your device.</p></section>
         <section class="panel live-conversation"><header class="module-header"><div><div class="eyebrow">ONE RESPONDER AT A TIME</div><h3>Live conversation</h3></div><span class="status-badge">TEXT + VOICE</span></header><div class="live-selectors"><label>Agent<select id="liveAgentSelect"></select></label><label>Room<select id="liveRoomSelect"></select></label></div><div class="live-wake-controls"><label class="checkbox-control"><input id="liveWakeWordEnabled" type="checkbox"> Wait for a wake phrase</label><label>Wake phrase<input id="liveWakeWord" maxlength="80" placeholder="Optional, e.g. hey grid"></label></div><p id="liveNoAgent" class="empty-state hidden">Add an agent in Agents first. This view will populate automatically.</p><ol id="liveTranscript" class="live-transcript"></ol><p id="liveInterim" class="live-interim" aria-live="polite"></p><form id="liveMessageForm" class="live-composer"><textarea id="liveMessageInput" rows="3" placeholder="Type a message, or start listening…"></textarea><div><button class="primary-button" type="submit">Send to agent</button><button class="secondary-button" id="liveListen" type="button" data-live-action="listen">Start listening</button><button class="ghost-button" id="liveStopReply" type="button" data-live-action="stop-reply">Stop voice</button></div></form><div class="live-record-actions"><button class="secondary-button" id="liveSaveTranscript" type="button" data-live-action="save-transcript" disabled>Save transcript</button><button class="ghost-button" type="button" data-live-action="clear-transcript">Clear this session</button></div><div id="liveSavedTranscripts" class="live-saved-transcripts"></div></section>
       </div>
       <section class="panel live-voice-panel"><header class="module-header"><div><div class="eyebrow">VOICE PREVIEW</div><h3>Choose how this agent sounds</h3></div><span class="status-badge">BROWSER VOICE</span></header><p class="panel-copy">These are voices your device already provides. HexiGrid does not upload recordings or clone a voice. Preview three options, then save the one you like to the selected agent.</p><div class="live-voice-controls"><label>Voice<select id="liveVoiceSelect"></select></label><label>Rate<input id="liveVoiceRate" type="range" min="0.5" max="2" step="0.05" value="1"></label><label>Pitch<input id="liveVoicePitch" type="range" min="0" max="2" step="0.05" value="1"></label><label>Volume<input id="liveVoiceVolume" type="range" min="0.1" max="1" step="0.05" value="0.72"></label></div><div class="live-voice-actions"><button class="secondary-button" type="button" data-live-voice-action="preview" data-preview="0">Preview 1</button><button class="secondary-button" type="button" data-live-voice-action="preview" data-preview="1">Preview 2</button><button class="secondary-button" type="button" data-live-voice-action="preview" data-preview="2">Preview 3</button><button class="primary-button" type="button" data-live-voice-action="save">Save voice</button><button class="ghost-button" type="button" data-live-voice-action="stop">Stop preview</button></div><p id="liveVoiceSupport" class="microcopy">Checking this browser’s speech voices…</p><p id="liveVoiceValue" class="microcopy">1.00× · pitch 1.00</p></section>`;
@@ -322,7 +328,7 @@
   }
 
   window.addEventListener('hexigrid:rendered', () => { mount(); renderSelectors(); renderSavedTranscripts(); });
-  window.HexiGridLiveCall = Object.freeze({ selectedAgent, selectedRoom, setStatus, renderSelectors, activeMediaStream });
+  window.HexiGridLiveCall = Object.freeze({ selectedAgent, selectedRoom, setStatus, renderSelectors, activeMediaStream, addEntry, frameFromPreview });
   bind();
   setTimeout(mount, 0);
 })();

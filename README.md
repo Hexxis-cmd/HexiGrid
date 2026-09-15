@@ -12,15 +12,15 @@ It is a bridge between people and the AI tools they already use. You can run it 
 - A no-key browser path for supported devices to run small WebGPU models locally.
 - Any number of agents, accounts, model providers, chat rooms, tasks, plugins, and workspaces.
 - Live model discovery instead of an outdated built-in model list.
-- Agent profiles with names, pictures, personalities, instructions, rules, memories, and model routing.
+- Agent profiles with names, pictures, animated GIF/WebP or lazy-loaded GLB 3D avatars, personalities, instructions, rules, memories, and model routing.
 - One-to-one and group chat with local activity receipts and token usage tracking.
-- A one-agent-at-a-time Live view with text, optional browser speech recognition, spoken replies, camera/screen preview, deliberate vision snapshots, local transcript saving, and opt-in device recording.
+- A one-agent-at-a-time Live view with text, optional browser speech recognition, spoken replies, provider-backed WebRTC audio, consented custom voices for eligible providers, camera/screen preview, deliberate vision snapshots, local transcript saving, and opt-in device recording.
 - Planning, conversation, research, build, goal, and watch modes with approval controls.
 - Bounded autonomous tasks with pause, cancellation, retries, limits, and emergency stop.
 - Reviewed plugins and MCP tools with capability permissions, digest checks, isolation, and revocation.
 - Local image generation support when a connected provider exposes image models.
 - Encrypted local state, encrypted backup and restore, Google Drive backup as an optional separate connection, and OS-protected API keys.
-- Installable PWA behavior, mobile layouts, offline shell support, and secure LAN pairing.
+- Installable PWA behavior, mobile layouts, offline shell support, secure LAN pairing, and an optional user-started temporary HTTPS link for calls away from home.
 
 ## Run it with the local service
 

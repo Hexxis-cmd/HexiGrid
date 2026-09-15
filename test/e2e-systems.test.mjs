@@ -256,6 +256,8 @@ test('model switching supports a configured provider per agent', async () => {
     assert.equal(boundary.body.bridge.dashboardDirectMessaging, false);
     assert.equal(boundary.body.bridge.runnerMessaging, false);
     assert.equal(boundary.body.bridge.dashboardChatTransport, 'local-only');
+    assert.equal(boundary.body.bridge.liveMedia.supported, false);
+    assert.match(boundary.body.bridge.liveMedia.reason, /does not expose camera/);
   } finally { await new Promise((resolve) => modelServer.close(resolve)); }
 });
 

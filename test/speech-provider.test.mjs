@@ -20,3 +20,10 @@ test('OpenAI-compatible speech stays on the configured origin and accepts audio 
   await assert.rejects(generateSpeechWithProvider({ baseUrl: 'https://speech.example/v1', apiStyle: 'anthropic' }, 'key', { model: 'm', voice: 'v', text: 't' }), /OpenAI-compatible/);
   await assert.rejects(generateSpeechWithProvider({ baseUrl: 'https://speech.example/v1', apiStyle: 'openai-chat' }, 'key', { model: 'm', voice: 'v', text: 't' }, { fetcher: async () => new Response('<html>', { headers: { 'content-type': 'text/html' } }) }), /unsupported audio/);
 });
+
+test('provider-issued custom voice IDs use the custom voice object format', async () => {
+  await generateSpeechWithProvider({ baseUrl: 'https://speech.example/v1', apiStyle: 'openai-chat' }, 'key', { model: 'tts-model', voice: 'voice_1234', text: 'Hello' }, { fetcher: async (_url, options) => {
+    assert.deepEqual(JSON.parse(options.body).voice, { id: 'voice_1234' });
+    return new Response(Buffer.from('audio'), { headers: { 'content-type': 'audio/mpeg' } });
+  } });
+});

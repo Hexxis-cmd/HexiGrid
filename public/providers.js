@@ -22,10 +22,10 @@ providerRoot.innerHTML = `<div class="page-intro"><div><div class="eyebrow">AI C
   <section class="panel"><div class="eyebrow">YOUR CONNECTIONS</div><h3>Ready to use</h3><div id="providerList"></div></section>
 </div>`;
 document.querySelector('.main-content').append(providerRoot);
-providerRoot.querySelector('#providerImages')?.closest('label')?.insertAdjacentHTML('afterend', '<label class="checkbox-control"><input id="providerSpeech" type="checkbox"> This service has an OpenAI-compatible text-to-speech endpoint</label>');
+providerRoot.querySelector('#providerImages')?.closest('label')?.insertAdjacentHTML('afterend', '<label class="checkbox-control"><input id="providerSpeech" type="checkbox"> This service has an OpenAI-compatible text-to-speech endpoint</label><label class="checkbox-control"><input id="providerRealtime" type="checkbox"> This service supports OpenAI-compatible realtime voice calls</label>');
 
 function capabilityLabel(capability) {
-  return ({ chat: 'chat', image: 'images', speech: 'speech' })[capability] || capability;
+  return ({ chat: 'chat', image: 'images', speech: 'speech', realtime: 'realtime voice' })[capability] || capability;
 }
 
 const providerNav = document.createElement('button');
@@ -207,7 +207,7 @@ document.querySelector('#providerForm').addEventListener('submit',async(event)=>
   const button=event.submitter; button.disabled=true; const feedback=document.querySelector('#providerFeedback'); feedback.textContent='Checking the connection and finding models…';
   try {
     if (!isHostBrowser() && !isStandaloneBrowser() && !(await switchToStandaloneBrowser())) return;
-    const result=await api('/api/providers',{method:'POST',body:JSON.stringify({name:document.querySelector('#providerName').value,baseUrl:document.querySelector('#providerAddress').value,apiStyle:document.querySelector('#providerStyle').value,models:document.querySelector('#providerModels').value,capabilities:['chat',...(document.querySelector('#providerImages').checked?['image']:[]),...(document.querySelector('#providerSpeech')?.checked?['speech']:[])],apiKey:document.querySelector('#providerKey').value})});
+    const result=await api('/api/providers',{method:'POST',body:JSON.stringify({name:document.querySelector('#providerName').value,baseUrl:document.querySelector('#providerAddress').value,apiStyle:document.querySelector('#providerStyle').value,models:document.querySelector('#providerModels').value,capabilities:['chat',...(document.querySelector('#providerImages').checked?['image']:[]),...(document.querySelector('#providerSpeech')?.checked?['speech']:[]),...(document.querySelector('#providerRealtime')?.checked?['realtime']:[])],apiKey:document.querySelector('#providerKey').value})});
     document.querySelector('#providerKey').value=''; document.querySelector('#providerModels').value=''; await refresh(); feedback.textContent=`Connected ${result.directBrowser ? 'directly from this browser' : 'through the local HexiGrid service'}. Found ${result.provider.modelIds.length} model${result.provider.modelIds.length===1?'':'s'}.`;
   } catch(error){feedback.textContent=error.message;} finally {button.disabled=false;}
 });

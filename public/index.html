@@ -1247,6 +1247,13 @@ HexiGrid safe terminal. Type help to see available commands.</pre
               >
                 Copy phone address
               </button>
+              <button
+                class="secondary-button full-button"
+                data-action="toggle-remote-link"
+                id="remoteLinkButton"
+              >
+                Open temporary remote link
+              </button>
             </div>
             <div class="panel connection-card">
               <div class="connector-head">
@@ -1389,6 +1396,15 @@ HexiGrid safe terminal. Type help to see available commands.</pre
               >
                 Remove
               </button>
+            </div>
+          </div>
+          <div class="agent-photo-editor agent-model-editor">
+            <div id="agentModelPreview" class="agent-model-preview"><span>3D</span></div>
+            <div>
+              <strong>Optional 3D avatar</strong>
+              <p>Choose one self-contained GLB model under 8 MB. It loads only when this agent is shown in Live, so regular dashboard pages stay fast.</p>
+              <label class="secondary-button file-button">Choose GLB model<input id="agentModelInput" type="file" accept="model/gltf-binary,.glb" /></label>
+              <button type="button" class="ghost-button" data-action="remove-agent-model">Remove 3D avatar</button>
             </div>
           </div>
           <div class="form-grid two-col">
@@ -1793,8 +1809,10 @@ HexiGrid safe terminal. Type help to see available commands.</pre
     <script src="/integrations.js" defer></script>
     <script src="/auth-ui.js" defer></script>
     <script src="/live-voice.js" defer></script>
+    <script src="/avatar-viewer.js" defer></script>
     <script src="/live-recording.js" defer></script>
     <script src="/live-call.js" defer></script>
+    <script src="/live-realtime.js" defer></script>
     <script src="/live-generated-voice.js" defer></script>
   </body>
 </html>

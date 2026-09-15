@@ -203,9 +203,22 @@ The **Live** screen gives one agent the floor at a time. It is not a hidden call
 3. Choose **Start camera + mic** only if you want a private preview. Choose **Preview screen** to switch to a tab, window, or screen selected in the browser picker.
 4. To let a compatible vision model see one moment, choose **Attach current frame**, then send the message. The live video stays local; HexiGrid sends only that resized still image. Turn on **Include one fresh frame with every message** only when you want that behavior.
 5. For free spoken replies, preview the voices already on the device and save one to the agent. For a connected OpenAI-compatible speech service, mark that provider as supporting speech, enter its speech model and permitted voice IDs, make three real previews, and save the one you choose. Provider speech may cost money.
-6. **Stop voice** silences audio but does not cancel the written answer. The complete text remains in the live transcript.
-7. Choose **Save transcript** only when you want to keep the text in local encrypted state. Choose **Record to this device** only when you want a camera/screen recording downloaded to that device; recording stops after 15 minutes or about 250 MB.
-8. Choose **Stop media** when finished. Closing the page also releases camera, microphone, and screen tracks.
+6. For a real low-latency provider call, mark the connection as **Realtime voice**, choose its realtime model in Live, and press **Start realtime call**. HexiGrid asks for microphone permission and any required policy approval. The browser uses WebRTC while the saved API key stays in the host credential vault. If a camera or screen preview is already open, you may separately turn on **Share live visual context**; it sends small snapshots at the rate you choose, never raw continuous video. This works only with providers exposing the compatible endpoint and may cost money.
+7. To create a custom voice, open **Create a custom voice from consented recordings**. Add the exact spoken-consent file required by the provider and one clean sample, confirm the speaker agreed, then create and preview the returned voice. Each file must be supported audio under 10 MB. OpenAI currently limits this feature to eligible customers; see the [official Audio API](https://platform.openai.com/docs/api-reference/audio/createVoice).
+8. To use a 3D avatar, edit the agent and choose one self-contained `.glb` file under 8 MB. Outside texture/file links are rejected. The viewer loads only when that avatar is visible in Live. Google model-viewer's supported-browser details are in its [official project documentation](https://github.com/google/model-viewer).
+9. **Stop voice** silences generated speech but does not cancel the written answer. **End call** closes realtime WebRTC audio. The complete transcript received from the provider remains available.
+
+### Call while away from home
+
+1. On the computer running HexiGrid, install [Cloudflare's `cloudflared` program](https://developers.cloudflare.com/tunnel/downloads/). A free Quick Tunnel does not need a Cloudflare account.
+2. Create an owner passcode in HexiGrid and switch the mode at the top to **Connect**.
+3. Open **Settings → Open on another device → Open temporary remote link** and approve it.
+4. Copy the temporary address and pairing code to your other device. Open the address, enter the pairing code, then sign in normally.
+5. When the call is over, press **Close temporary remote link**. The link also closes when HexiGrid stops.
+
+The temporary link itself is public, so do not post it. Pairing and sign-in protect the app, and sensitive host-only setup actions stay blocked remotely. Cloudflare says Quick Tunnels are for testing and do not have an uptime promise; see its [official Quick Tunnel guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/).
+10. Choose **Save transcript** only when you want to keep the text in local encrypted state. Choose **Record to this device** only when you want a camera/screen recording downloaded to that device; recording stops after 15 minutes or about 250 MB.
+11. Choose **Stop media** when finished. Closing the page also releases camera, microphone, screen, and realtime-call tracks.
 
 If the camera, microphone, screen picker, speech recognition, speech output, or recorder is unavailable, HexiGrid disables or explains that control and keeps text chat usable. Browser support details are available from [MDN camera and microphone](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia), [MDN screen capture](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia), [MDN speech synthesis](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis), and [MDN MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).
 
