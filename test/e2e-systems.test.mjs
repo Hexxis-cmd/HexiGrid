@@ -245,7 +245,13 @@ test('model switching supports a configured provider per agent', async () => {
     assert.equal(reply.body.replies[0].transport, 'hexigrid-local-chat');
     assert.equal(reply.body.replies[0].delivery, 'local-only');
 
-    const linked = await request('/api/agents', 'POST', { name: 'Runner-linked profile', transport: 'ilands-runner', model: `provider:${provider.body.provider.id}:model-one`, ilandsAgentId: 'public-test-agent-id' });
+    const linked = await request('/api/agents', 'POST', { name: 'Runner-linked profile', transport: 'ilands-runner', model: `provider:${provider.body.provider.id}:model-one`, ilandsAgentId: 'public-test-agent-id', externalEmail: 'agent@example.test' });
+    assert.equal(linked.body.agent.externalEmail, 'agent@example.test');
+    const emailReceipt = await request('/api/live/email-receipt', 'POST', { agentId: linked.body.agent.id, action: 'send', status: 'completed' });
+    assert.equal(emailReceipt.response.status, 201);
+    assert.equal(emailReceipt.body.receipt.action, 'agent_email:send');
+    assert.equal(emailReceipt.body.receipt.agentId, linked.body.agent.id);
+    assert.doesNotMatch(JSON.stringify(emailReceipt.body.receipt), /agent@example\.test/);
     const linkedRoom = await request('/api/rooms', 'POST', { name: 'Runner boundary test' });
     const linkedReply = await request(`/api/rooms/${linkedRoom.body.room.id}/messages`, 'POST', { content: 'Does this go to iLands?', agentIds: [linked.body.agent.id] });
     assert.equal(linkedReply.body.replies[0].content, 'model:model-one');
@@ -257,7 +263,9 @@ test('model switching supports a configured provider per agent', async () => {
     assert.equal(boundary.body.bridge.runnerMessaging, false);
     assert.equal(boundary.body.bridge.dashboardChatTransport, 'local-only');
     assert.equal(boundary.body.bridge.liveMedia.supported, false);
-    assert.match(boundary.body.bridge.liveMedia.reason, /does not expose camera/);
+    assert.equal(boundary.body.bridge.liveMedia.transport, 'runner-native');
+    assert.equal(boundary.body.bridge.externalAgentChannels.emailBridge, true);
+    assert.equal(boundary.body.bridge.externalAgentChannels.agentAuthoredTools, true);
   } finally { await new Promise((resolve) => modelServer.close(resolve)); }
 });
 

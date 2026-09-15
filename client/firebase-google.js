@@ -25,18 +25,33 @@ const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/drive.appdata');
 provider.setCustomParameters({ prompt: 'select_account' });
 let driveToken = '';
+let mailToken = '';
+const mailProvider = new GoogleAuthProvider();
+mailProvider.addScope('https://www.googleapis.com/auth/gmail.readonly');
+mailProvider.addScope('https://www.googleapis.com/auth/gmail.send');
+mailProvider.setCustomParameters({ prompt: 'consent' });
+
+function publicAccount(user = auth.currentUser) {
+  return user ? { uid: user.uid, displayName: user.displayName || '', email: user.email || '', photoURL: user.photoURL || '' } : null;
+}
 
 function account(result) {
   const credential = result ? GoogleAuthProvider.credentialFromResult(result) : null;
   if (credential?.accessToken) driveToken = credential.accessToken;
-  const user = result?.user || auth.currentUser;
-  return user ? { uid: user.uid, displayName: user.displayName || '', email: user.email || '', photoURL: user.photoURL || '' } : null;
+  return publicAccount(result?.user || auth.currentUser);
 }
 
 async function prepare() {
   await setPersistence(auth, browserLocalPersistence);
+  const mailRedirect = sessionStorage.getItem('hexigrid-google-mail-redirect') === '1';
   const result = await getRedirectResult(auth);
-  return result ? account(result) : account(null);
+  if (!result) return account(null);
+  if (mailRedirect) {
+    sessionStorage.removeItem('hexigrid-google-mail-redirect');
+    mailToken = GoogleAuthProvider.credentialFromResult(result)?.accessToken || '';
+    return publicAccount(result.user);
+  }
+  return account(result);
 }
 
 async function connect({ force = false } = {}) {
@@ -106,14 +121,73 @@ async function downloadBackup(fileId) {
   return (await driveRequest(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`)).json();
 }
 
+function encodeMail(value) {
+  const bytes = new TextEncoder().encode(value); let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+}
+
+function decodeMail(value = '') {
+  const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - value.length % 4) % 4);
+  return new TextDecoder().decode(Uint8Array.from(atob(padded), (character) => character.charCodeAt(0)));
+}
+
+async function gmailRequest(path, options = {}) {
+  if (!mailToken) throw new Error('Connect Google Mail for this agent bridge first.');
+  const token = mailToken;
+  const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) }, redirect: 'error', referrerPolicy: 'no-referrer' });
+  if (!response.ok) { if ([401, 403].includes(response.status)) mailToken = ''; throw new Error('Google Mail permission is unavailable. Reconnect Google and approve Mail access.'); }
+  return response;
+}
+
+async function connectMail() {
+  await setPersistence(auth, browserLocalPersistence);
+  let result;
+  try { result = await signInWithPopup(auth, mailProvider); }
+  catch (error) {
+    if (!['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(error?.code)) throw error;
+    sessionStorage.setItem('hexigrid-google-mail-redirect', '1');
+    await signInWithRedirect(auth, mailProvider);
+    return null;
+  }
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  mailToken = credential?.accessToken || '';
+  if (!mailToken) throw new Error('Google did not grant Mail permission.');
+  return publicAccount(result.user);
+}
+
+async function sendAgentEmail({ to, subject, text }) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(to || ''))) throw new Error('Enter the agent’s working email address first.');
+  const safeSubject = String(subject || 'HexiGrid message').replace(/[\r\n]/g, ' ').slice(0, 180);
+  const raw = `To: ${to}\r\nSubject: ${safeSubject}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${String(text || '').slice(0, 50000)}`;
+  return gmailRequest('/messages/send', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ raw: encodeMail(raw) }) }).then((response) => response.json());
+}
+
+function plainPart(payload) {
+  if (payload?.mimeType === 'text/plain' && payload.body?.data) return decodeMail(payload.body.data);
+  for (const part of payload?.parts || []) { const value = plainPart(part); if (value) return value; }
+  return payload?.body?.data ? decodeMail(payload.body.data) : '';
+}
+
+async function listAgentEmails(from, after = 0) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(from || ''))) throw new Error('Enter the agent’s working email address first.');
+  const list = await gmailRequest(`/messages?q=${encodeURIComponent(`from:${from} newer_than:7d`)}&maxResults=20`).then((response) => response.json());
+  const messages = await Promise.all((list.messages || []).map(({ id }) => gmailRequest(`/messages/${encodeURIComponent(id)}?format=full`).then((response) => response.json())));
+  return messages.map((message) => ({ id: message.id, receivedAt: Number(message.internalDate || 0), text: plainPart(message.payload).trim().slice(0, 50000) })).filter((message) => message.receivedAt > Number(after) && message.text).sort((a, b) => a.receivedAt - b.receivedAt);
+}
+
 window.HexiGridGoogle = Object.freeze({
   prepare,
   connect,
   idToken,
   current: () => account(null),
   onChange: (callback) => onAuthStateChanged(auth, () => callback(account(null))),
-  disconnect: async () => { driveToken = ''; await signOut(auth); },
+  disconnect: async () => { driveToken = ''; mailToken = ''; await signOut(auth); },
   listBackups,
   uploadBackup,
   downloadBackup,
+  sendAgentEmail,
+  listAgentEmails,
+  connectMail,
+  mailConnected: () => Boolean(mailToken),
 });

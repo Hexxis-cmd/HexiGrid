@@ -726,6 +726,11 @@ function cleanImageData(value) {
   return /^data:image\/(png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(value) ? value : "";
 }
 
+function cleanEmail(value) {
+  const email = cleanString(value).toLowerCase().slice(0, 320);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+
 function slug(value) {
   return cleanString(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 }
@@ -1071,8 +1076,13 @@ function bridgeStatus() {
     dashboardChatTransport: 'local-only',
     liveMedia: {
       supported: false,
-      transport: null,
-      reason: 'The current public iLands BYOA Runner contract does not expose camera, microphone, WebRTC, or dashboard chat transport. Live calls use the user-selected model provider instead.'
+      transport: 'runner-native',
+      reason: 'The Runner itself is not used as the camera or WebRTC transport. HexiGrid provides those device channels and can invite an iLands agent through its working email or agent-authored external tools.'
+    },
+    externalAgentChannels: {
+      emailBridge: true,
+      agentAuthoredTools: true,
+      hexigridLiveMedia: true
     },
     supportedRunnerHarnesses: supportedRunnerHarnesses(),
     host: HOST,
@@ -2186,6 +2196,26 @@ async function route(req, res) {
     }));
   }
 
+  if (method === 'POST' && pathname === '/api/live/email-receipt') {
+    const body = await readBody(req);
+    const action = ['send', 'invite', 'check'].includes(body.action) ? body.action : '';
+    const receiptStatus = ['completed', 'failed'].includes(body.status) ? body.status : '';
+    const agent = findAgent(cleanString(body.agentId));
+    if (!action || !receiptStatus || !agent) return json(res, 400, { error: 'That agent email receipt is invalid.' });
+    const receipt = addReceipt({
+      agentId: agent.id,
+      action: `agent_email:${action}`,
+      capability: action === 'check' ? 'network_read' : 'external_write',
+      risk: action === 'invite' ? 'medium' : 'low',
+      status: receiptStatus,
+      detail: receiptStatus === 'completed' ? `${action === 'check' ? 'Checked for mail from' : action === 'invite' ? 'Sent a temporary call invitation to' : 'Sent a message to'} ${agent.name} through the separately authorized Google Mail connection.` : `The ${action} email action for ${agent.name} failed.`,
+      source: 'agent-email'
+    });
+    addActivity('agent-email', receiptStatus === 'completed' ? `${agent.name} email action completed.` : `${agent.name} email action failed.`);
+    await saveState();
+    return json(res, 201, { receipt });
+  }
+
   if (pathname === "/api/agents" && method === "GET") return json(res, 200, { agents: state.agents });
   if (pathname === "/api/agents" && method === "POST") {
     const body = await readBody(req);
@@ -2202,6 +2232,7 @@ async function route(req, res) {
       transport: body.transport === "local-opencode" ? "local-opencode" : "ilands-runner",
       harness: body.harness === "claude-code" ? "claude-code" : "codex",
       ilandsAgentId: cleanString(body.ilandsAgentId),
+      externalEmail: cleanEmail(body.externalEmail),
       runnerHome: cleanString(body.runnerHome),
       workspacePath: cleanString(body.workspacePath),
       personality: cleanString(body.personality),
@@ -2225,7 +2256,7 @@ async function route(req, res) {
     const source = findAgent(duplicateMatch[1]);
     if (!source) return json(res, 404, { error: "Agent not found." });
     const timestamp = now();
-    const copy = { ...source, id: id("agent"), name: `${source.name} copy`, accountLabel: "New iLands account", ilandsAgentId: "", runnerHome: "", workspacePath: "", status: "not_connected", createdAt: timestamp, updatedAt: timestamp };
+    const copy = { ...source, id: id("agent"), name: `${source.name} copy`, accountLabel: "New iLands account", ilandsAgentId: "", externalEmail: "", runnerHome: "", workspacePath: "", status: "not_connected", createdAt: timestamp, updatedAt: timestamp };
     state.agents.push(copy);
     addActivity("agent", `${source.name} profile was duplicated as ${copy.name}.`);
     await saveState();
@@ -2291,10 +2322,11 @@ async function route(req, res) {
     const agent = findAgent(agentMatch[1]);
     if (!agent) return json(res, 404, { error: "Agent not found." });
     const body = await readBody(req);
-    const editable = ["name", "accountLabel", "avatar", "avatarImage", "color", "transport", "harness", "ilandsAgentId", "runnerHome", "workspacePath", "personality", "instructions", "rules", "status", "tags", "model", "useGlobalCommunication", "voiceProfile"];
+    const editable = ["name", "accountLabel", "avatar", "avatarImage", "color", "transport", "harness", "ilandsAgentId", "externalEmail", "runnerHome", "workspacePath", "personality", "instructions", "rules", "status", "tags", "model", "useGlobalCommunication", "voiceProfile"];
     for (const key of editable) {
       if (body[key] === undefined) continue;
       if (["name", "accountLabel", "avatar", "color", "ilandsAgentId", "runnerHome", "workspacePath", "personality", "instructions", "rules", "status"].includes(key)) agent[key] = cleanString(body[key]);
+      if (key === 'externalEmail') agent.externalEmail = cleanEmail(body[key]);
       else if (key === "avatarImage") agent[key] = cleanImageData(body[key]);
       else if (key === "transport") agent[key] = body[key] === "local-opencode" ? "local-opencode" : "ilands-runner";
       else if (key === "harness") agent[key] = body[key] === "claude-code" ? "claude-code" : "codex";

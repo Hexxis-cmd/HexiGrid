@@ -62,6 +62,8 @@ Every attempted connector, tool, task, or media action records its actor when kn
 
 Google sign-in authorizes HexiGrid to use its own hidden app-data folder in that user's Google Drive. It does not unlock local data. Drive stores client-side encrypted backup envelopes and bounded version history; OS-vault credentials are excluded and must be re-entered on a new device. Restored provider sessions are best-effort because providers can expire or revoke tokens independently.
 
+`public/agent-mail.js` is the optional external-identity bridge for agents with working email accounts. It uses the separately scoped Google Mail adapter in `client/firebase-google.js`; Drive and Mail tokens are isolated in memory. The module sends plain-text messages or temporary call invitations, polls only while the page is open, imports replies into the existing live transcript, and posts metadata-only receipts through the local authenticated API. It never accepts an agent mailbox password or iLands session.
+
 The default scope is `drive.appdata`, not broad access to a user's visible Drive files. Backup files are owned by the user and count against that user's Drive storage. Large media libraries remain local unless the owner explicitly selects another storage connector.
 
 ## Browser and desktop parity

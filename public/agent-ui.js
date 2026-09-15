@@ -26,7 +26,7 @@ function openAgentModal(agentId = null) {
   $("#agentId").value = item?.id || "";
   const fields = {
     agentName: item?.name || "", accountLabel: item?.accountLabel || "", transport: item?.transport || "ilands-runner",
-    harness: item?.harness || "codex", ilandsAgentId: item?.ilandsAgentId || "", runnerHome: item?.runnerHome || "",
+    harness: item?.harness || "codex", ilandsAgentId: item?.ilandsAgentId || "", externalEmail: item?.externalEmail || "", runnerHome: item?.runnerHome || "",
     workspacePath: item?.workspacePath || "", personality: item?.personality || "", instructions: item?.instructions || "", rules: item?.rules || ""
   };
   Object.entries(fields).forEach(([key, value]) => { $("#" + key).value = value; });
@@ -113,7 +113,7 @@ async function saveAgent(event) {
   event.preventDefault();
   const payload = {
     name: $("#agentName").value, accountLabel: $("#accountLabel").value, transport: $("#transport").value,
-    harness: $("#harness").value, ilandsAgentId: $("#ilandsAgentId").value, runnerHome: $("#runnerHome").value,
+    harness: $("#harness").value, ilandsAgentId: $("#ilandsAgentId").value, externalEmail: $("#externalEmail").value, runnerHome: $("#runnerHome").value,
     workspacePath: $("#workspacePath").value, personality: $("#personality").value, instructions: $("#instructions").value,
     rules: $("#rules").value, model: $("#agentModel").value, useGlobalCommunication: $("#agentUseGlobalCommunication").checked,
     avatarImage: state.avatarDraft

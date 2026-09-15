@@ -24,6 +24,7 @@
   const id = (prefix) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
   const bodyOf = (options) => options?.body ? JSON.parse(options.body) : {};
   const clean = (value, fallback = '') => String(value ?? '').trim() || fallback;
+  const cleanEmail = (value) => { const email = clean(value).toLowerCase().slice(0, 320); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : ''; };
   const communicationDefaults = () => ({
     enabled: true,
     instructions: 'Write like a real person having a clear conversation. Prefer the shortest complete answer. Use ordinary words, vary sentence length, avoid repeated reassurance, and do not stack several adjectives where one will do.',
@@ -228,11 +229,11 @@
     if (pathname === '/api/agents' && method === 'POST') {
       const body = bodyOf(options); const name = clean(body.name, `Agent ${state.agents.length + 1}`);
       const voice = body.voiceProfile && typeof body.voiceProfile === 'object' ? body.voiceProfile : {};
-      const agent = { id: id('agent'), name, accountLabel: clean(body.accountLabel, 'Standalone browser'), avatar: clean(body.avatar, name[0]?.toUpperCase() || 'A'), avatarImage: clean(body.avatarImage), color: clean(body.color, '#8d7dff'), status: 'local_ready', transport: 'browser', harness: '', ilandsAgentId: '', runnerHome: '', workspacePath: '', personality: clean(body.personality), instructions: clean(body.instructions), rules: clean(body.rules), model: clean(body.model, state.settings.model), useGlobalCommunication: body.useGlobalCommunication !== false, voiceProfile: { engine: voice.engine === 'provider' ? 'provider' : 'browser', voiceName: clean(voice.voiceName).slice(0, 200), providerId: clean(voice.providerId).slice(0, 120), model: clean(voice.model).slice(0, 240), voiceId: clean(voice.voiceId).slice(0, 200), rate: Math.min(2, Math.max(.5, Number(voice.rate) || 1)), pitch: Math.min(2, Math.max(0, Number(voice.pitch) || 1)), volume: Math.min(1, Math.max(0, Number(voice.volume) || 1)) }, tags: Array.isArray(body.tags) ? body.tags.slice(0, 12) : [], createdAt: now(), updatedAt: now() };
+      const agent = { id: id('agent'), name, accountLabel: clean(body.accountLabel, 'Standalone browser'), avatar: clean(body.avatar, name[0]?.toUpperCase() || 'A'), avatarImage: clean(body.avatarImage), color: clean(body.color, '#8d7dff'), status: 'local_ready', transport: 'browser', harness: '', ilandsAgentId: '', externalEmail: cleanEmail(body.externalEmail), runnerHome: '', workspacePath: '', personality: clean(body.personality), instructions: clean(body.instructions), rules: clean(body.rules), model: clean(body.model, state.settings.model), useGlobalCommunication: body.useGlobalCommunication !== false, voiceProfile: { engine: voice.engine === 'provider' ? 'provider' : 'browser', voiceName: clean(voice.voiceName).slice(0, 200), providerId: clean(voice.providerId).slice(0, 120), model: clean(voice.model).slice(0, 240), voiceId: clean(voice.voiceId).slice(0, 200), rate: Math.min(2, Math.max(.5, Number(voice.rate) || 1)), pitch: Math.min(2, Math.max(0, Number(voice.pitch) || 1)), volume: Math.min(1, Math.max(0, Number(voice.volume) || 1)) }, tags: Array.isArray(body.tags) ? body.tags.slice(0, 12) : [], createdAt: now(), updatedAt: now() };
       state.agents.push(agent); addActivity(state, 'agent', `${agent.name} was added to this browser.`); await save(state); return { agent };
     }
     const duplicate = pathname.match(/^\/api\/agents\/([^/]+)\/duplicate$/);
-    if (duplicate && method === 'POST') { const source = state.agents.find((item) => item.id === duplicate[1]); if (!source) failure(404, 'Agent not found.'); const agent = { ...source, id: id('agent'), name: `${source.name} copy`, createdAt: now(), updatedAt: now() }; state.agents.push(agent); await save(state); return { agent }; }
+    if (duplicate && method === 'POST') { const source = state.agents.find((item) => item.id === duplicate[1]); if (!source) failure(404, 'Agent not found.'); const agent = { ...source, id: id('agent'), name: `${source.name} copy`, externalEmail: '', createdAt: now(), updatedAt: now() }; state.agents.push(agent); await save(state); return { agent }; }
     const agentMatch = pathname.match(/^\/api\/agents\/([^/]+)$/);
     if (agentMatch) {
       const agent = state.agents.find((item) => item.id === agentMatch[1]); if (!agent) failure(404, 'Agent not found.');
@@ -242,6 +243,7 @@
           const voice = patch.voiceProfile;
           patch.voiceProfile = { engine: voice.engine === 'provider' ? 'provider' : 'browser', voiceName: clean(voice.voiceName).slice(0, 200), providerId: clean(voice.providerId).slice(0, 120), model: clean(voice.model).slice(0, 240), voiceId: clean(voice.voiceId).slice(0, 200), rate: Math.min(2, Math.max(.5, Number(voice.rate) || 1)), pitch: Math.min(2, Math.max(0, Number(voice.pitch) || 1)), volume: Math.min(1, Math.max(0, Number(voice.volume) || 1)) };
         }
+        if (patch.externalEmail !== undefined) patch.externalEmail = cleanEmail(patch.externalEmail);
         Object.assign(agent, patch, { updatedAt: now() }); await save(state); return { agent };
       }
       if (method === 'DELETE') { state.agents = state.agents.filter((item) => item.id !== agent.id); state.rooms.forEach((room) => { room.agentIds = room.agentIds.filter((item) => item !== agent.id); }); state.memories = state.memories.filter((item) => item.agentId !== agent.id); await save(state); return { ok: true }; }
@@ -275,6 +277,13 @@
     }
 
     if (pathname === '/api/live/transcripts' && method === 'GET') return { transcripts: structuredClone(state.liveTranscripts || []) };
+    if (pathname === '/api/live/email-receipt' && method === 'POST') {
+      const body = bodyOf(options); const agent = state.agents.find((item) => item.id === clean(body.agentId));
+      const action = ['send', 'invite', 'check'].includes(body.action) ? body.action : ''; const receiptStatus = ['completed', 'failed'].includes(body.status) ? body.status : '';
+      if (!agent || !action || !receiptStatus) failure(400, 'That agent email receipt is invalid.');
+      const receipt = addReceipt(state, { agentId: agent.id, action: `agent_email:${action}`, capability: action === 'check' ? 'network_read' : 'external_write', risk: action === 'invite' ? 'medium' : 'low', status: receiptStatus, source: 'agent-email', detail: `${agent.name} email action ${receiptStatus}.` });
+      await save(state); return { receipt };
+    }
     if (pathname === '/api/live/transcripts' && method === 'POST') {
       const body = bodyOf(options);
       const entries = Array.isArray(body.entries) ? body.entries.slice(-600).map((entry) => ({ role: ['user', 'agent', 'system'].includes(entry?.role) ? entry.role : 'system', agentId: clean(entry?.agentId) || null, speaker: clean(entry?.speaker, entry?.role === 'user' ? 'You' : 'HexiGrid'), text: clean(entry?.text).slice(0, 12000), createdAt: clean(entry?.createdAt, now()) })).filter((entry) => entry.text) : [];

@@ -26,6 +26,12 @@ Local export and Google Drive backup encrypt the control-room snapshot with an a
 
 Google receives only the encrypted envelope in its private `drive.appdata` area. Firebase keeps the Google sign-in session in the browser; the short-lived Drive access token remains in memory and is never written to HexiGrid state. The backup password is not uploaded or saved by HexiGrid. Losing it makes the ciphertext unrecoverable; that is the cost of keeping cloud storage unable to decrypt the backup.
 
+## Optional agent email
+
+The Live page can use a separately approved Google Mail connection to message an agent at the working email saved in that agent's local profile. HexiGrid requests only Gmail read and send scopes after the user presses an email action. Its short-lived Mail token remains in page memory, is kept separate from the Drive token, and is cleared on disconnect or authorization failure.
+
+Reply checks ask Gmail only for recent messages from the selected agent's exact address. Message text enters the temporary live transcript; it is persisted only when the user chooses **Save transcript**. Email receipts record the agent, action, result, and time but never the message body, OAuth token, or pairing code. The agent's own password is never requested or stored.
+
 ## Storage and cost boundary
 
 The Google Drive file belongs to the user’s Google account and uses that account’s storage/quota. HexiGrid does not buy storage, upload readable data, or use a central private database. If Google is unavailable, local operation continues.

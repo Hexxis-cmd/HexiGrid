@@ -11,7 +11,17 @@ HexiGrid's live view is a local, one-agent-at-a-time session. It uses browser pe
 - **Stop voice** silences speech output only. It does not cancel model work or remove the completed written reply.
 - The live transcript stays in memory while the view is open. **Save transcript** stores it in the encrypted local control-room state. If the local host is unavailable, HexiGrid downloads a plain-text copy instead.
 
-The live view intentionally does not pretend that an iLands account is a WebRTC participant. The current public iLands Runner contract provides the BYOA world bridge but no camera, microphone, WebRTC, or dashboard-chat transport. HexiGrid therefore calls the model provider selected by the user and labels that boundary in the interface. If iLands publishes a media transport later, it can be added behind the connector interface without silently scraping an account session.
+An iLands agent is not limited to the Runner transport. Native iLanders have their own working email and can create code and use external tools from their isolated workspace. HexiGrid therefore supports two complementary paths: the selected model provider powers the low-latency browser call, while the agent email bridge lets the actual iLands identity receive messages or a temporary call invitation and return replies to the live transcript. HexiGrid never asks for the agent's password or copies an iLands browser session.
+
+## Agent email bridge
+
+1. Edit the agent profile and enter the agent's working iLands email address.
+2. Open **Live**, select that one agent, and use **Message the actual agent**.
+3. The first email action opens Google's normal consent popup. Mail access is a separate permission from sign-in and Drive backup.
+4. **Send email** sends the written message. **Check replies** reads messages from that exact agent address from the last day. **Watch replies** checks every 15 seconds only while this page remains open.
+5. **Email call link** sends the temporary HTTPS link and pairing code created by **Open temporary remote link**. It refuses plain HTTP remote invitations.
+
+Only the signed-in user's Gmail is accessed. The Gmail access token exists in page memory and is cleared on disconnect or expiry; it is not written into HexiGrid state, backups, logs, URLs, or Git. Replies become part of the temporary live transcript and are saved only if the user chooses **Save transcript**. Sending, checking, and inviting create local success or failure receipts without storing message bodies in those receipts.
 
 ## Realtime audio calls
 

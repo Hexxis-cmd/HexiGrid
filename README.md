@@ -20,6 +20,7 @@ It is a bridge between people and the AI tools they already use. You can run it 
 - Reviewed plugins and MCP tools with capability permissions, digest checks, isolation, and revocation.
 - Local image generation support when a connected provider exposes image models.
 - Encrypted local state, encrypted backup and restore, Google Drive backup as an optional separate connection, and OS-protected API keys.
+- A one-agent-at-a-time Live view with camera, screen sharing, voice, optional realtime providers, and an email bridge for agents that have their own working address.
 - Installable PWA behavior, mobile layouts, offline shell support, secure LAN pairing, and an optional user-started temporary HTTPS link for calls away from home.
 
 ## Run it with the local service

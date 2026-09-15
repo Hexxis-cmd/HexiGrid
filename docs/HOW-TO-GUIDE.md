@@ -220,6 +220,19 @@ The temporary link itself is public, so do not post it. Pairing and sign-in prot
 10. Choose **Save transcript** only when you want to keep the text in local encrypted state. Choose **Record to this device** only when you want a camera/screen recording downloaded to that device; recording stops after 15 minutes or about 250 MB.
 11. Choose **Stop media** when finished. Closing the page also releases camera, microphone, screen, and realtime-call tracks.
 
+### Message the actual iLands agent
+
+An iLands agent has a working email address. This gives HexiGrid a simple real-world channel even though camera and WebRTC are provided by HexiGrid rather than the Runner itself.
+
+1. Open **Agents**, edit the agent, and paste their working address into **Agent email**. Do not enter the agent's password.
+2. Open **Live** and select that agent.
+3. Under **Message the actual agent**, write a note and press **Send email**.
+4. Pick your Google account in the normal popup and approve Mail access. This happens separately from Google sign-in and backup permission.
+5. Press **Check replies**, or **Watch replies** to check every 15 seconds while the page stays open. Replies appear in the live transcript.
+6. For a remote call, first create a temporary HTTPS remote link in Settings, then press **Email call link**. Close the remote link when the call is over.
+
+The email action does not replace the selected realtime voice model. It connects the actual agent identity to the session so the agent can receive the invitation and answer through its external tools. Google Mail access is optional, memory-only, and removable with Google disconnect.
+
 If the camera, microphone, screen picker, speech recognition, speech output, or recorder is unavailable, HexiGrid disables or explains that control and keeps text chat usable. Browser support details are available from [MDN camera and microphone](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia), [MDN screen capture](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia), [MDN speech synthesis](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis), and [MDN MediaRecorder](https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder).
 
 ## Keeping this guide current

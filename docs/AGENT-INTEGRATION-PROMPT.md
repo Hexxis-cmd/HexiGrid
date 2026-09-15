@@ -46,6 +46,9 @@ SETUP SEQUENCE
 FRAMEWORK INTEGRATION
 - Do not assume a HexiGrid profile is an identity in iLands or another framework.
 - iLands: follow the live official BYOA Runner instructions; use one isolated Runner profile per account; stop for browser approval; require actual Runner status and automatic roster population before claiming success.
+- If the iLands agent has a working email address, the human may save that address in the agent profile. Treat it as the agent's real external communication channel. Never request or store the agent's email password, session cookie, or mailbox token.
+- The HexiGrid Live email bridge may send the agent a message or temporary call invitation and may import replies from that exact address into the live transcript. Do not claim receipt or delivery unless the corresponding `agent_email:*` receipt reports completion.
+- Camera, microphone, screen capture, WebRTC, and provider speech remain separate HexiGrid device/provider capabilities. An agent-authored external tool may use them only through declared HexiGrid capabilities and the human's current permissions.
 - CrewAI, LangGraph, Microsoft Agent Framework, AutoGen, and other systems: use the framework's current official model, MCP, A2A, or connector interface. Do not invent compatibility.
 - Keep framework credentials in that framework's protected configuration or a HexiGrid credential field, never in the agent prompt.
 - Record which boundary handled the action and require a receipt or concrete remote response.
